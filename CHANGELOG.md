@@ -1,14 +1,6 @@
 # Changelog
 
-All notable changes to KRAB-9000 are documented here. Format loosely follows
-[Keep a Changelog](https://keepachangelog.com/); versioning follows
-[Semantic Versioning](https://semver.org/) (staying under 1.0.0 until the mod
-has had a public beta cycle).
-
 ## [0.1.0] — First public release
-
-Everything below shipped together in this first release — there's no prior
-public version to diff against.
 
 ### What it is
 
