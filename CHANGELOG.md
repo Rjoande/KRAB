@@ -1,5 +1,7 @@
 # Changelog
 
+## [0.1.0] — First public release
+
 ### What it is
 
 KRAB-9000 (Kerbal Routing & Axis Blender) extends the Breaking Ground KAL-1000 controller with a full node-graph mixer. Where the KAL-1000 plays back a hand-authored sequence, the KRAB-9000 listens continuously, every frame, blending player input, autopilot output and live vessel telemetry into whatever a servo, engine or control surface should be doing right now.
