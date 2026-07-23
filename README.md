@@ -9,7 +9,7 @@ right now.
 Where the KAL-1000 plays back a hand-authored sequence, the KRAB-9000
 *listens* continuously, every frame, and reacts.
 
-![KRAB-9000 logo](docs/KRAB_logo_400.png)
+![KRAB-9000 logo](docs/KRAB_logo_800.png)
 
 ## What it does
 
