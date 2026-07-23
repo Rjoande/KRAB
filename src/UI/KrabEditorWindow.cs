@@ -105,6 +105,12 @@ namespace KRAB.UI
 		private Part pendingPickPart;
 		private const string PickLockId = "KRAB_EDITOR_PICK";
 
+		// Persistent highlight on the active output tab's bound target part (in-game
+		// request, 2026-07-24; same mechanism as KRILL's KrillWindow — same color,
+		// same "don't clobber it with the transient pick-hover" guard).
+		private Part highlightedPart;
+		private static readonly Color TargetHighlightColor = new Color(0.18f, 0.35f, 0.85f);
+
 		private static readonly string[] Channels =
 		{
 			"Pitch", "Yaw", "Roll", "TranslateX", "TranslateY", "TranslateZ", "MainThrottle",
@@ -148,9 +154,11 @@ namespace KRAB.UI
 		private void OnDestroy()
 		{
 			ClearPickerState();
+			ClearTargetHighlight();
 			KrabCurveWindow.CloseAny(); // a curve window points into this editor's graph — don't leave it floating
 			InputLockManager.RemoveControlLock(InputLockId);
 			GameEvents.onGameSceneLoadRequested.Remove(OnSceneChange);
+			GameEvents.onVesselChange.Remove(OnActiveVesselChanged);
 			if (current == this)
 			{
 				current = null;
@@ -160,6 +168,15 @@ namespace KRAB.UI
 		private void OnSceneChange(GameScenes scene)
 		{
 			Close();
+		}
+
+		/// <summary>Re-validates the target highlight when the active vessel changes —
+		/// the bound target part may have gone out of load range (bug found in
+		/// KRILL's own version of this mechanism: switching vessels away could leave
+		/// a stale highlight on a part from a no-longer-relevant ship).</summary>
+		private void OnActiveVesselChanged(Vessel v)
+		{
+			UpdateTargetHighlight();
 		}
 
 		private void Close()
@@ -301,6 +318,7 @@ namespace KRAB.UI
 		private void Build()
 		{
 			GameEvents.onGameSceneLoadRequested.Add(OnSceneChange);
+			GameEvents.onVesselChange.Add(OnActiveVesselChanged);
 
 			Canvas canvas = gameObject.AddComponent<Canvas>();
 			canvas.renderMode = RenderMode.ScreenSpaceOverlay;
@@ -393,6 +411,7 @@ namespace KRAB.UI
 
 			if (Graph == null)
 			{
+				ClearTargetHighlight();
 				KrabUi.Label(contentHost, Loc("#LOC_KRAB_ui_noGraph"), 13, KrabUi.Muted, TextAnchor.MiddleCenter);
 				Button create = KrabUi.TextButton(contentHost, Loc("#LOC_KRAB_ui_createGraph"),
 					() => { module.CreateEmptyGraph(); RebuildContent(); },
@@ -405,6 +424,7 @@ namespace KRAB.UI
 			Validate();
 			CollectOutputs();
 			BuildPortLookups();
+			UpdateTargetHighlight();
 
 			// Picker modes replace tabs/tree/simulator until resolved or cancelled.
 			if ((pickerKind != PickerKind.None || pickingPart)
@@ -753,13 +773,30 @@ namespace KRAB.UI
 			return NodeName(output) + " → " + ResolveTargetLabel(output, part, field);
 		}
 
+		private const int TargetLabelMaxChars = 15;
+
+		/// <summary>Caps a string to TargetLabelMaxChars total, ellipsizing the tail
+		/// (in-game request, 2026-07-24: long part/field names could stretch the
+		/// target card past its layout).</summary>
+		private static string Truncate(string text)
+		{
+			if (string.IsNullOrEmpty(text) || text.Length <= TargetLabelMaxChars)
+			{
+				return text;
+			}
+			return text.Substring(0, TargetLabelMaxChars - 1) + "…";
+		}
+
 		/// <summary>Prefers "Part title - Field/action GUI name" (in-game feedback,
 		/// 2026-07-15: the raw persisted name, e.g. "targetAngle", told the player
 		/// nothing when several outputs point at similar fields) — falls back to the
 		/// raw persisted name if the live field/action can't be resolved right now (e.g.
-		/// the module happens to be unloaded), so the target still shows something.</summary>
+		/// the module happens to be unloaded), so the target still shows something.
+		/// Part name and field/action name are each truncated independently, so a
+		/// long part title doesn't push the field name out of sight.</summary>
 		private static string ResolveTargetLabel(KrabNode output, Part part, string rawField)
 		{
+			string partName = Truncate(part.partInfo.title);
 			if (output.Info.name == "AxisOutput")
 			{
 				if (TryResolveAxisField(output, out BaseAxisField axisField, out _))
@@ -767,12 +804,12 @@ namespace KRAB.UI
 					string guiName = string.IsNullOrEmpty(axisField.guiName)
 						? axisField.name
 						: Localizer.Format(axisField.guiName);
-					return part.partInfo.title + " - " + guiName;
+					return partName + " - " + Truncate(guiName);
 				}
 			}
 			else if (TryResolveAction(output, out BaseAction action, out _))
 			{
-				return part.partInfo.title + " - " + Localizer.Format(action.guiName);
+				return partName + " - " + Truncate(Localizer.Format(action.guiName));
 			}
 			return rawField;
 		}
@@ -1351,6 +1388,58 @@ namespace KRAB.UI
 			RebuildContent();
 		}
 
+		/// <summary>The active output tab's bound part, if any and if still resolvable
+		/// (loaded). Null when nothing is bound, or the target no longer exists.</summary>
+		private Part ResolveActiveOutputTargetPart()
+		{
+			int index = FindOutputIndex(activeOutputId);
+			if (index < 0)
+			{
+				return null;
+			}
+			KrabNode output = outputNodes[index];
+			uint.TryParse(output.GetString("persistentId", "0"), out uint persistentId);
+			if (persistentId == 0 || !TryFindPart(persistentId, out Part part))
+			{
+				return null;
+			}
+			return part;
+		}
+
+		private void ApplyTargetHighlight()
+		{
+			if (highlightedPart != null)
+			{
+				highlightedPart.SetHighlightType(Part.HighlightType.AlwaysOn);
+				highlightedPart.SetHighlightColor(TargetHighlightColor);
+				highlightedPart.SetHighlight(true, false);
+			}
+		}
+
+		private void ClearTargetHighlight()
+		{
+			if (highlightedPart != null)
+			{
+				highlightedPart.SetHighlightDefault();
+				highlightedPart = null;
+			}
+		}
+
+		/// <summary>Re-resolves the active output's target and updates the persistent
+		/// highlight only if it actually changed (called on every RebuildContent, so
+		/// this must stay cheap and idempotent).</summary>
+		private void UpdateTargetHighlight()
+		{
+			Part resolved = ResolveActiveOutputTargetPart();
+			if (resolved == highlightedPart)
+			{
+				return;
+			}
+			ClearTargetHighlight();
+			highlightedPart = resolved;
+			ApplyTargetHighlight();
+		}
+
 		private void ClearPickerState()
 		{
 			pickerKind = PickerKind.None;
@@ -1360,7 +1449,17 @@ namespace KRAB.UI
 			pendingPickPart = null;
 			if (hoverPart != null)
 			{
-				hoverPart.SetHighlightDefault();
+				// Un-hovering the part that's ALSO the persistent target highlight must
+				// restore the blue highlight, not clear it to default (same fix KRILL
+				// needed porting this exact mechanism — see the bug report).
+				if (hoverPart == highlightedPart)
+				{
+					ApplyTargetHighlight();
+				}
+				else
+				{
+					hoverPart.SetHighlightDefault();
+				}
 				hoverPart = null;
 			}
 			InputLockManager.RemoveControlLock(PickLockId);
@@ -1433,7 +1532,16 @@ namespace KRAB.UI
 			{
 				if (hoverPart != null)
 				{
-					hoverPart.SetHighlightDefault();
+					// Same guard as ClearPickerState: don't erase the persistent target
+					// highlight just because the transient pick-hover moved off of it.
+					if (hoverPart == highlightedPart)
+					{
+						ApplyTargetHighlight();
+					}
+					else
+					{
+						hoverPart.SetHighlightDefault();
+					}
 				}
 				hoverPart = hovered;
 				if (hoverPart != null)

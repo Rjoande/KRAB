@@ -55,9 +55,13 @@
     </Reference>
   </ItemGroup>
 
-  <!-- Deploy the plugin DLL into the mod folder KSP actually loads -->
+  <!-- Deploy the plugin DLL into the mod folder KSP actually loads. Repo root
+       (this project's parent) now mirrors the GitHub repo layout; the real
+       installable mod folder is repo-root/GameData/KRAB/ (2026-07-25 reorg —
+       see CLAUDE.md). It still resolves inside this dev KSP install's own
+       GameData/ tree, so it loads exactly as-is with no separate copy step. -->
   <Target Name="DeployToGameData" AfterTargets="Build">
-    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(MSBuildProjectDirectory)\..\Plugins\" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(MSBuildProjectDirectory)\..\GameData\KRAB\Plugins\" />
   </Target>
 
 </Project>
