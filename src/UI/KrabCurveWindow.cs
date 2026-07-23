@@ -281,13 +281,9 @@ namespace KRAB.UI
 			KrabUi.TextButton(footer.transform, Loc("#LOC_KRAB_ui_curveReset"), ResetToLinear,
 				KrabUi.Panel2, KrabUi.Danger, 12, 0f, 24f);
 			KrabUi.Spacer(footer.transform);
-			// Plain safe glyphs (core Arrows block, already vetted elsewhere in this UI —
-			// see KrabUi.IconButton's own note on font coverage), not custom PNGs: flip
-			// wasn't part of the icon set the player already drew (in-game request,
-			// 2026-07-21).
-			Button flipVButton = KrabUi.IconButton(footer.transform, "↕", FlipVertical, KrabUi.TanDim, 22f);
+			Button flipVButton = KrabUi.ImageIconButton(footer.transform, "flipV", FlipVertical, KrabUi.TanDim, 22f);
 			KrabUi.Tooltip(flipVButton.gameObject, "#LOC_KRAB_tip_flipVertical");
-			Button flipHButton = KrabUi.IconButton(footer.transform, "↔", FlipHorizontal, KrabUi.TanDim, 22f);
+			Button flipHButton = KrabUi.ImageIconButton(footer.transform, "flipH", FlipHorizontal, KrabUi.TanDim, 22f);
 			KrabUi.Tooltip(flipHButton.gameObject, "#LOC_KRAB_tip_flipHorizontal");
 
 			RedrawGraph();

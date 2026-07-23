@@ -1304,7 +1304,7 @@ namespace KRAB.UI
 					}
 					Color color = issue.severity == IssueSeverity.Error ? KrabUi.Danger
 						: issue.severity == IssueSeverity.Warning ? KrabUi.Warn : KrabUi.Muted;
-					KrabUi.Label(strip, "● " + issue.message, 12, color);
+					KrabUi.Label(strip, "● " + issue.LocalizedText(), 12, color);
 				}
 			}
 

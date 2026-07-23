@@ -131,12 +131,14 @@ namespace KRAB.Graph
 				{
 					// Keep the node (round-trip promise) but flag it: links cannot reference it.
 					graph.loadIssues.Add(new ValidationIssue(IssueSeverity.Error, "nodeMissingId",
-						"NODE without id (subtype '" + item.subtypeName + "'), unreachable by links"));
+						"NODE without id (subtype '" + item.subtypeName + "'), unreachable by links",
+						null, item.subtypeName ?? ""));
 				}
 				else if (graph.byId.ContainsKey(item.id))
 				{
 					graph.loadIssues.Add(new ValidationIssue(IssueSeverity.Error, "nodeDuplicateId",
-						"duplicate node id '" + item.id + "', links resolve to the first occurrence"));
+						"duplicate node id '" + item.id + "', links resolve to the first occurrence",
+						null, item.id));
 				}
 				else
 				{
@@ -199,11 +201,19 @@ namespace KRAB.Graph
 					continue;
 				}
 				SubtypeInfo elsewhere = KrabSubtypes.Find(n.subtypeName);
-				string detail = elsewhere != null
-					? "subtype '" + n.subtypeName + "' belongs to kind " + elsewhere.kind + ", not '" + n.typeName + "'"
-					: "unknown subtype '" + n.subtypeName + "' (newer mod version?)";
-				issues.Add(new ValidationIssue(IssueSeverity.Warning, "nodeUnknownSubtype",
-					"node '" + n.id + "' disabled: " + detail, n.id));
+				if (elsewhere != null)
+				{
+					issues.Add(new ValidationIssue(IssueSeverity.Warning, "nodeWrongKind",
+						"node '" + n.id + "' disabled: subtype '" + n.subtypeName + "' belongs to kind "
+							+ elsewhere.kind + ", not '" + n.typeName + "'", n.id,
+						n.id, n.subtypeName ?? "", elsewhere.kind.ToString(), n.typeName ?? ""));
+				}
+				else
+				{
+					issues.Add(new ValidationIssue(IssueSeverity.Warning, "nodeUnknownSubtype",
+						"node '" + n.id + "' disabled: unknown subtype '" + n.subtypeName + "' (newer mod version?)", n.id,
+						n.id, n.subtypeName ?? ""));
+				}
 			}
 
 			// Port occupancy per node: port index -> covered by link (true) or default (false).
@@ -220,25 +230,25 @@ namespace KRAB.Graph
 				if (from == null || to == null)
 				{
 					issues.Add(new ValidationIssue(IssueSeverity.Error, "linkDangling",
-						"link " + link + " references a missing node"));
+						"link " + link + " references a missing node", null, link.ToString()));
 					continue;
 				}
 				if (from.IsKnown && from.Info.kind == NodeKind.Output)
 				{
 					issues.Add(new ValidationIssue(IssueSeverity.Error, "linkFromOutput",
-						"link " + link + " starts from an OUTPUT node, which has no output port"));
+						"link " + link + " starts from an OUTPUT node, which has no output port", null, link.ToString()));
 					continue;
 				}
 				if (to.IsKnown && to.Info.kind == NodeKind.Source)
 				{
 					issues.Add(new ValidationIssue(IssueSeverity.Error, "linkIntoSource",
-						"link " + link + " targets a SOURCE node, which has no input ports"));
+						"link " + link + " targets a SOURCE node, which has no input ports", null, link.ToString()));
 					continue;
 				}
 				if (link.toPort < 0)
 				{
 					issues.Add(new ValidationIssue(IssueSeverity.Error, "linkBadPort",
-						"link " + link + " has a negative port index"));
+						"link " + link + " has a negative port index", null, link.ToString()));
 					continue;
 				}
 				if (!ports.TryGetValue(to, out Dictionary<int, bool> occupied))
@@ -249,7 +259,8 @@ namespace KRAB.Graph
 				if (occupied.ContainsKey(link.toPort))
 				{
 					issues.Add(new ValidationIssue(IssueSeverity.Error, "portMultipleLinks",
-						"node '" + to.id + "' port " + link.toPort + " has more than one incoming link", to.id));
+						"node '" + to.id + "' port " + link.toPort + " has more than one incoming link", to.id,
+						to.id, link.toPort.ToString()));
 					continue;
 				}
 				occupied.Add(link.toPort, true);
@@ -264,7 +275,7 @@ namespace KRAB.Graph
 				if (target == null)
 				{
 					issues.Add(new ValidationIssue(IssueSeverity.Error, "defaultDangling",
-						"DEFAULT for missing node '" + def.nodeId + "'"));
+						"DEFAULT for missing node '" + def.nodeId + "'", null, def.nodeId ?? ""));
 					continue;
 				}
 				if (!ports.TryGetValue(target, out Dictionary<int, bool> occupied))
@@ -278,7 +289,8 @@ namespace KRAB.Graph
 						viaLink ? "defaultShadowed" : "defaultDuplicate",
 						"node '" + target.id + "' port " + def.port + (viaLink
 							? " has both a link and a DEFAULT; the DEFAULT is ignored"
-							: " has more than one DEFAULT"), target.id));
+							: " has more than one DEFAULT"), target.id,
+						target.id, def.port.ToString()));
 					continue;
 				}
 				occupied.Add(def.port, false);
@@ -312,7 +324,8 @@ namespace KRAB.Graph
 					if (covered < n.Info.MinInputs)
 					{
 						issues.Add(new ValidationIssue(IssueSeverity.Error, "tooFewInputs",
-							"node '" + n.id + "' (" + n.subtypeName + ") has " + covered + " input(s), needs at least " + n.Info.MinInputs, n.id));
+							"node '" + n.id + "' (" + n.subtypeName + ") has " + covered + " input(s), needs at least " + n.Info.MinInputs, n.id,
+							n.id, n.subtypeName ?? "", covered.ToString(), n.Info.MinInputs.ToString()));
 						continue;
 					}
 				}
@@ -325,7 +338,8 @@ namespace KRAB.Graph
 					if (occupied == null || !occupied.ContainsKey(port))
 					{
 						issues.Add(new ValidationIssue(IssueSeverity.Error, "portUnconnected",
-							"node '" + n.id + "' (" + n.subtypeName + ") port " + port + " has no link and no DEFAULT", n.id));
+							"node '" + n.id + "' (" + n.subtypeName + ") port " + port + " has no link and no DEFAULT", n.id,
+							n.id, n.subtypeName ?? "", port.ToString()));
 					}
 				}
 			}
@@ -343,7 +357,7 @@ namespace KRAB.Graph
 			if (!anyActiveOutput)
 			{
 				issues.Add(new ValidationIssue(IssueSeverity.Warning, "noActiveOutput",
-					"no connected output node: the graph drives nothing"));
+					"no connected output node: the graph drives nothing", null));
 			}
 
 			// Nodes that feed no output do no harm, but flag them for the player.
@@ -377,7 +391,8 @@ namespace KRAB.Graph
 				if (n.IsKnown && n.Info.kind != NodeKind.Output && !feedingOutput.Contains(n))
 				{
 					issues.Add(new ValidationIssue(IssueSeverity.Info, "nodeOrphan",
-						"node '" + n.id + "' (" + n.subtypeName + ") feeds no output", n.id));
+						"node '" + n.id + "' (" + n.subtypeName + ") feeds no output", n.id,
+						n.id, n.subtypeName ?? ""));
 				}
 			}
 
@@ -424,8 +439,9 @@ namespace KRAB.Graph
 						}
 						else if (childState == 1)
 						{
+							string cycle = DescribeCycle(stack, child);
 							issues.Add(new ValidationIssue(IssueSeverity.Error, "graphCycle",
-								"cycle detected: " + DescribeCycle(stack, child)));
+								"cycle detected: " + cycle, null, cycle));
 							return; // one report is enough; the graph is invalid anyway
 						}
 					}
