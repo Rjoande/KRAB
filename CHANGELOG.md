@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.0]
+
+### Added
+
+- **Loading screen tips**: five KRAB-flavoured tips — crab puns and logic gates — in English and Italian. They need the optional [LoadingTipsPlus](https://github.com/JPLRepo/LoadingTipsPlus) mod to show up, and they're added to the existing tip pool rather than replacing the stock rotation. Without LoadingTipsPlus installed, nothing changes.
+
 ## [0.1.0] — First public release
 
 ### What it is

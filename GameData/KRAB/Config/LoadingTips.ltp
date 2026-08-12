@@ -1,0 +1,18 @@
+// Loading screen tips for LoadingTipsPlus (REPOSoftTech) — an OPTIONAL mod.
+// Without it installed this file is simply never read: LoadingTipsPlus scans
+// GameData recursively for *.ltp, so nothing else in KSP touches it.
+//
+// Overwrite = false: add these to the existing tip pool rather than replacing
+// stock/other mods' tips — KRAB has no business hijacking the whole rotation.
+//
+// The strings live in Localization/*.cfg like every other player-facing text
+// (#LOC_KRAB_loadtip_*), so the tips are translated along with the rest.
+LOADINGTOOLTIPSPLUS
+{
+	Overwrite = false
+	ToolTip = #LOC_KRAB_loadtip_01
+	ToolTip = #LOC_KRAB_loadtip_02
+	ToolTip = #LOC_KRAB_loadtip_03
+	ToolTip = #LOC_KRAB_loadtip_04
+	ToolTip = #LOC_KRAB_loadtip_05
+}
