@@ -15,7 +15,7 @@
 
 ### Notes
 
-These came out of an extended attempt to build a constant-speed propeller governor entirely from a KRAB graph. The governor itself never reached a configuration that held up smoothly across the full throttle range, so it isn't shipped as a documented recipe in this release, but every primitive it needed along the way turned out to be generally useful, and all of them are in this changelog.
+These came out of an extended attempt to build a constant-speed propeller governor entirely from a KRAB graph. The closed-loop approach that motivated Part Field and Integrator turned out to need more than a graph could give it cleanly, but the fix that actually worked was simpler: a measured speed→pitch curve, buildable with tools KRAB already had in 0.1.0 (Vessel State, a Remap with a curve, Axis Output). The governor flies; it just didn't end up needing anything new. Part Field, Integrator and the clamp stay in this release as generally useful primitives in their own right, exercised and proven by the attempt that produced them.
 
 ## [0.2.0]
 
