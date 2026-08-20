@@ -14,6 +14,7 @@ namespace KRAB.Graph.Evaluation
 		private RuntimeNode[] ordered;
 		private readonly List<AxisOutputRuntime> axisOutputs = new List<AxisOutputRuntime>();
 		private readonly List<ActionTriggerRuntime> triggers = new List<ActionTriggerRuntime>();
+		private readonly List<PartFieldRuntime> partFields = new List<PartFieldRuntime>();
 		private readonly Dictionary<KrabNode, RuntimeNode> byDefinition = new Dictionary<KrabNode, RuntimeNode>();
 
 		/// <summary>Live output of a node, for UI telemetry. False when the node is unknown.</summary>
@@ -96,6 +97,10 @@ namespace KRAB.Graph.Evaluation
 				else if (runtime is ActionTriggerRuntime trigger)
 				{
 					evaluator.triggers.Add(trigger);
+				}
+				else if (runtime is PartFieldRuntime partField)
+				{
+					evaluator.partFields.Add(partField);
 				}
 			}
 
@@ -244,6 +249,7 @@ namespace KRAB.Graph.Evaluation
 				case "ScriptAxis": return new ScriptAxisRuntime();
 				case "PhysicalState": return new PhysicalStateRuntime();
 				case "ActionGroupState": return new ActionGroupStateRuntime();
+				case "PartField": return new PartFieldRuntime();
 				case "WeightedSum": return new WeightedSumRuntime();
 				case "Product": return new ProductRuntime();
 				case "Min": return new MinRuntime();
@@ -251,6 +257,7 @@ namespace KRAB.Graph.Evaluation
 				case "Remap": return new RemapRuntime();
 				case "GatedBlend": return new GatedBlendRuntime();
 				case "Derivative": return new DerivativeRuntime();
+				case "Integrator": return new IntegratorRuntime();
 				case "SlewRate": return new SlewRateRuntime();
 				case "Comparator": return new ComparatorRuntime();
 				case "Hold": return new HoldRuntime();
@@ -277,6 +284,10 @@ namespace KRAB.Graph.Evaluation
 			for (int i = 0; i < triggers.Count; i++)
 			{
 				triggers[i].ResolveTarget(vessel);
+			}
+			for (int i = 0; i < partFields.Count; i++)
+			{
+				partFields[i].ResolveTarget(vessel);
 			}
 		}
 

@@ -98,6 +98,11 @@ namespace KRAB.UI
 		private PickerKind pickerKind;
 		private KrabNode pickerTarget;
 		private int pickerPort;
+		// Non-null while TargetField is picking a part+field for a brand-new source
+		// (Part Field) instead of retargeting an existing output — pickerTarget:pickerPort
+		// still name the CONSUMER port in this case, unlike StartPartPick(output) where
+		// pickerTarget IS the node being retargeted. Set by StartPartFieldPick.
+		private string pickerNewSourceSubtype;
 		private bool pickingPart;
 		private Part pickedPart;
 		private Part hoverPart;
@@ -159,6 +164,10 @@ namespace KRAB.UI
 			InputLockManager.RemoveControlLock(InputLockId);
 			GameEvents.onGameSceneLoadRequested.Remove(OnSceneChange);
 			GameEvents.onVesselChange.Remove(OnActiveVesselChanged);
+			GameEvents.onHideUI.Remove(HandleHideUI);
+			GameEvents.onShowUI.Remove(HandleShowUI);
+			GameEvents.onGamePause.Remove(HandleGamePause);
+			GameEvents.onGameUnpause.Remove(HandleGameUnpause);
 			if (current == this)
 			{
 				current = null;
@@ -177,6 +186,47 @@ namespace KRAB.UI
 		private void OnActiveVesselChanged(Vessel v)
 		{
 			UpdateTargetHighlight();
+		}
+
+		// Independent flags: F2 and Esc can each be toggled on their own, the window
+		// stays hidden while either is active.
+		private bool hiddenByUI;
+		private bool hiddenByPause;
+
+		private void HandleHideUI()
+		{
+			hiddenByUI = true;
+			UpdateVisibility();
+		}
+
+		private void HandleShowUI()
+		{
+			hiddenByUI = false;
+			UpdateVisibility();
+		}
+
+		private void HandleGamePause()
+		{
+			hiddenByPause = true;
+			UpdateVisibility();
+		}
+
+		private void HandleGameUnpause()
+		{
+			hiddenByPause = false;
+			UpdateVisibility();
+		}
+
+		private void UpdateVisibility()
+		{
+			bool visible = !hiddenByUI && !hiddenByPause;
+			if (!visible && pickingPart)
+			{
+				// A scene part-pick holds an input lock and needs the (now invisible)
+				// prompt to make sense of it — cancel rather than leave both stranded.
+				CancelPicker();
+			}
+			gameObject.SetActive(visible);
 		}
 
 		private void Close()
@@ -226,9 +276,42 @@ namespace KRAB.UI
 					return Localizer.Format("#LOC_KRAB_ui_slot", node.GetString("slot", "1"));
 				case "Constant":
 					return node.GetString("value", "0");
+				case "PartField":
+					if (node.GetString("persistentId", "0") == "0")
+					{
+						return Loc("#LOC_KRAB_ui_notBound");
+					}
+					if (!TryResolvePartField(node, out Part pfPart, out string pfLabel))
+					{
+						return Loc("#LOC_KRAB_ui_targetMissing");
+					}
+					// Whole "part - field" pair truncated together, not each half on its
+					// own (in-game feedback, 2026-08-14: the per-output 15-char rule left
+					// this too long and it overran the simulator slider row).
+					return Truncate(pfPart.partInfo.title + " - " + pfLabel, PartFieldLabelMaxChars);
 				default:
 					return "";
 			}
+		}
+
+		/// <summary>
+		/// Full "Name · Detail" display string for a node — the tree row's source-leaf
+		/// button, the simulator row, and the REUSE A SIGNAL list all built this by hand
+		/// (NodeName(node) + " · " + detail); centralized here so all three special-case
+		/// Part Field the same way: with a "part - field" pair already shown, prefixing
+		/// it with "Part Field ·" is redundant (in-game feedback, 2026-08-14) — unlike
+		/// e.g. "Pitch" alone, which doesn't say whether it's PlayerAxis or ScriptAxis.
+		/// </summary>
+		private static string NodeLabel(KrabNode node)
+		{
+			string detail = node.IsKnown && node.Info.kind == NodeKind.Operator
+				? DescribeOperator(node)
+				: SourceDetail(node);
+			if (node.IsKnown && node.Info.name == "PartField")
+			{
+				return detail;
+			}
+			return NodeName(node) + " · " + detail;
 		}
 
 		// -------------------------------------------------------------- mutation
@@ -319,6 +402,14 @@ namespace KRAB.UI
 		{
 			GameEvents.onGameSceneLoadRequested.Add(OnSceneChange);
 			GameEvents.onVesselChange.Add(OnActiveVesselChanged);
+			// In-game report, 2026-08-15: the window ignored F2 (hide UI) and Esc (pause
+			// menu) — every other KSP UI hides for both. Toggling gameObject.SetActive
+			// stops Update/LateUpdate too (cheap while hidden) without tearing down any
+			// state; re-showing needs no rebuild, Unity just resumes calling them.
+			GameEvents.onHideUI.Add(HandleHideUI);
+			GameEvents.onShowUI.Add(HandleShowUI);
+			GameEvents.onGamePause.Add(HandleGamePause);
+			GameEvents.onGameUnpause.Add(HandleGameUnpause);
 
 			Canvas canvas = gameObject.AddComponent<Canvas>();
 			canvas.renderMode = RenderMode.ScreenSpaceOverlay;
@@ -472,6 +563,20 @@ namespace KRAB.UI
 			errorNodes.Clear();
 			warnNodes.Clear();
 			issues.AddRange(Graph.Validate());
+			// Graph.Validate() is scene-agnostic (also runs from KrabGraphSelfTest with no
+			// vessel loaded), so live part/field resolution can't live there. This is a
+			// UI-only addition, same warn-visible-never-silent policy as the missing-target
+			// case already covered by #LOC_KRAB_ui_targetMissing on the tree row itself.
+			foreach (KrabNode node in Graph.Nodes)
+			{
+				if (node.IsKnown && node.Info.name == "PartField"
+					&& node.GetString("persistentId", "0") != "0"
+					&& !TryResolvePartField(node, out _, out _))
+				{
+					issues.Add(new ValidationIssue(IssueSeverity.Warning, "partFieldMissing",
+						"PartField node '" + node.id + "': target part/field not found", node.id, node.id));
+				}
+			}
 			foreach (ValidationIssue issue in issues)
 			{
 				if (string.IsNullOrEmpty(issue.nodeId))
@@ -774,17 +879,24 @@ namespace KRAB.UI
 		}
 
 		private const int TargetLabelMaxChars = 15;
+		private const int PartFieldLabelMaxChars = 35;
 
 		/// <summary>Caps a string to TargetLabelMaxChars total, ellipsizing the tail
 		/// (in-game request, 2026-07-24: long part/field names could stretch the
 		/// target card past its layout).</summary>
 		private static string Truncate(string text)
 		{
-			if (string.IsNullOrEmpty(text) || text.Length <= TargetLabelMaxChars)
+			return Truncate(text, TargetLabelMaxChars);
+		}
+
+		/// <summary>Caps a string to maxChars total, ellipsizing the tail.</summary>
+		private static string Truncate(string text, int maxChars)
+		{
+			if (string.IsNullOrEmpty(text) || text.Length <= maxChars)
 			{
 				return text;
 			}
-			return text.Substring(0, TargetLabelMaxChars - 1) + "…";
+			return text.Substring(0, maxChars - 1) + "…";
 		}
 
 		/// <summary>Prefers "Part title - Field/action GUI name" (in-game feedback,
@@ -912,6 +1024,50 @@ namespace KRAB.UI
 			return field != null;
 		}
 
+		/// <summary>Resolves a PartField source's live part+module and a display label
+		/// for its bound member — a DerivedFieldsCatalog entry if one applies, otherwise
+		/// the module's own BaseField (UI-only lookup, mirrors TryResolveAxisField).</summary>
+		private static bool TryResolvePartField(KrabNode node, out Part part, out string label)
+		{
+			label = null;
+			uint.TryParse(node.GetString("persistentId", "0"), out uint persistentId);
+			if (!TryFindPart(persistentId, out part))
+			{
+				return false;
+			}
+			string fieldName = node.GetString("fieldName", "");
+			uint.TryParse(node.GetString("moduleId", "0"), out uint moduleId);
+			if (string.IsNullOrEmpty(fieldName) || moduleId == 0)
+			{
+				return false;
+			}
+			PartModule module = null;
+			for (int i = 0; i < part.Modules.Count; i++)
+			{
+				if (part.Modules[i].GetPersistentId() == moduleId)
+				{
+					module = part.Modules[i];
+					break;
+				}
+			}
+			if (module == null)
+			{
+				return false;
+			}
+			if (DerivedFieldsCatalog.TryFind(module, fieldName, out DerivedFieldRule rule))
+			{
+				label = LocOr(rule.label, fieldName);
+				return true;
+			}
+			BaseField field = module.Fields[fieldName];
+			if (field == null)
+			{
+				return false;
+			}
+			label = string.IsNullOrEmpty(field.guiName) ? field.name : Localizer.Format(field.guiName);
+			return true;
+		}
+
 		// ------------------------------------------------------------------- tree
 
 		private KrabNode UpstreamAt(KrabNode node, int port)
@@ -973,7 +1129,7 @@ namespace KRAB.UI
 				KrabNode capturedParent = parentGroup;
 				int capturedSlot = port;
 				KrabUi.TextButton(row.transform,
-					NodeName(node) + " · " + SourceDetail(node) + " ▾",
+					NodeLabel(node) + " ▾",
 					() => OpenSourcePicker(capturedParent, capturedSlot),
 					KrabUi.Inset, NodeColor(node, false), 12, 0f, 20f);
 			}
@@ -1115,6 +1271,36 @@ namespace KRAB.UI
 		}
 
 		/// <summary>
+		/// Optional clampMin/clampMax on WeightedSum and Integrator (in-game request,
+		/// 2026-08-16, after an unclamped Integrator's windup crashed a test flight):
+		/// the two fields alone can't tell "absent" from "zero", so presence itself is
+		/// the toggle — a button adds both at once with a wide-open default (-1000/1000,
+		/// practically unclamped until narrowed), an X removes both together. Never a
+		/// half-clamped state (only clampMin set): the pair is atomic.
+		/// </summary>
+		private void BuildClampFields(Transform parent, KrabNode node)
+		{
+			if (!node.HasParam("clampMin") && !node.HasParam("clampMax"))
+			{
+				KrabUi.TextButton(parent, Loc("#LOC_KRAB_ui_addClamp"), () => Mutate(() =>
+				{
+					node.SetParam("clampMin", -1000f);
+					node.SetParam("clampMax", 1000f);
+				}), KrabUi.Panel2, KrabUi.Tan, 11, 0f, 20f);
+				return;
+			}
+			ParamLabel(parent, "clamp");
+			NumberField(parent, node, "clampMin", "-1000", 44f);
+			NumberField(parent, node, "clampMax", "1000", 44f);
+			Button removeClamp = KrabUi.IconButton(parent, "✕", () => Mutate(() =>
+			{
+				node.RemoveParam("clampMin");
+				node.RemoveParam("clampMax");
+			}), KrabUi.Danger, 18f);
+			KrabUi.Tooltip(removeClamp.gameObject, "#LOC_KRAB_tip_removeClamp");
+		}
+
+		/// <summary>
 		/// Inline editable parameters per subtype. Vocabulary params (channel, metric,
 		/// group) are free text until the M3 pickers land: a typo simply disables the
 		/// node with a warning, never a crash (tolerant-parse policy).
@@ -1148,6 +1334,10 @@ namespace KRAB.UI
 				case "WeightedSum":
 					ParamLabel(parent, "w");
 					TextField(parent, node, "weights", "1", 110f);
+					BuildClampFields(parent, node);
+					break;
+				case "Integrator":
+					BuildClampFields(parent, node);
 					break;
 				case "Remap":
 					if (node.HasNode("curve"))
@@ -1239,7 +1429,7 @@ namespace KRAB.UI
 				KrabUi.Horizontal(row, 0, 8f);
 				KrabUi.Size(row, -1f, 20f);
 				Text label = KrabUi.Label(row.transform,
-					NodeName(node) + " · " + SourceDetail(node), 12, KrabUi.Text);
+					NodeLabel(node), 12, KrabUi.Text);
 				KrabUi.Size(label.gameObject, 200f, 20f);
 
 				if (node.Info.name == "ActionGroupState")
@@ -1318,6 +1508,13 @@ namespace KRAB.UI
 						case "verticalspeed": min = -300f; max = 300f; return;
 						default: min = 0f; max = 500f; return; // speeds, m/s
 					}
+				case "PartField":
+					// No per-field metadata to size this from (readouts rarely carry a
+					// UI_FloatRange/UI_MinMaxRange) — same generic-sensor fallback as an
+					// unlisted PhysicalState metric above.
+					min = 0f;
+					max = 500f;
+					return;
 			}
 		}
 
@@ -1388,6 +1585,21 @@ namespace KRAB.UI
 			RebuildContent();
 		}
 
+		/// <summary>
+		/// Starts the same scene part-pick as StartPartPick, but for authoring a brand-new
+		/// Part Field source instead of retargeting an existing output — so pickerTarget:
+		/// pickerPort (already set by OpenSourcePicker) must NOT be overwritten here; they
+		/// still name the consumer the new source will feed once a field is chosen.
+		/// </summary>
+		private void StartPartFieldPick()
+		{
+			pickerNewSourceSubtype = "PartField";
+			pickedPart = null;
+			pickingPart = true;
+			InputLockManager.SetControlLock(ControlTypes.ALLBUTCAMERAS, PickLockId);
+			RebuildContent();
+		}
+
 		/// <summary>The active output tab's bound part, if any and if still resolvable
 		/// (loaded). Null when nothing is bound, or the target no longer exists.</summary>
 		private Part ResolveActiveOutputTargetPart()
@@ -1445,6 +1657,7 @@ namespace KRAB.UI
 			pickerKind = PickerKind.None;
 			pickingPart = false;
 			pickerTarget = null;
+			pickerNewSourceSubtype = null;
 			pickedPart = null;
 			pendingPickPart = null;
 			if (hoverPart != null)
@@ -1587,6 +1800,14 @@ namespace KRAB.UI
 			BuildVocabularyFamily(list, "#LOC_KRAB_fam_actionGroup", ActionGroupNames, "#LOC_KRAB_ag_",
 				name => ApplyNewSource("ActionGroupState", "group", name));
 
+			// No fixed vocabulary (depends on the picked part): same "Pick target…" scene
+			// gesture as an output's target, but it starts a NEW source instead of
+			// retargeting an existing node (StartPartFieldPick, not StartPartPick).
+			KrabUi.Label(list, Loc("#LOC_KRAB_fam_partField"), 11, KrabUi.TanDim);
+			RectTransform partFieldGrid = KrabUi.Grid(list, 138f, 22f);
+			KrabUi.TextButton(partFieldGrid, Loc("#LOC_KRAB_ui_pickPart"), StartPartFieldPick,
+				KrabUi.Panel2, KrabUi.GreenHi, 11, 0f, 22f);
+
 			KrabUi.Label(list, Loc("#LOC_KRAB_fam_krabInput"), 11, KrabUi.TanDim);
 			RectTransform slotGrid = KrabUi.Grid(list, 138f, 22f);
 			for (int slot = 1; slot <= ModuleKRABController.InputSlotCount; slot++)
@@ -1627,10 +1848,7 @@ namespace KRAB.UI
 				foreach (KrabNode candidate in reusable)
 				{
 					KrabNode captured = candidate;
-					string detail = candidate.Info.kind == NodeKind.Source
-						? SourceDetail(candidate)
-						: DescribeOperator(candidate);
-					KrabUi.TextButton(list, NodeName(candidate) + " · " + detail + "  [" + candidate.id + "]",
+					KrabUi.TextButton(list, NodeLabel(candidate) + "  [" + candidate.id + "]",
 						() => ApplyExistingSource(captured), KrabUi.Panel2, KrabUi.Text, 11, 0f, 22f);
 				}
 			}
@@ -1723,6 +1941,11 @@ namespace KRAB.UI
 				CancelPicker();
 				return;
 			}
+			if (pickerNewSourceSubtype == "PartField")
+			{
+				BuildPartFieldPicker();
+				return;
+			}
 			bool axis = pickerTarget.Info.name == "AxisOutput";
 			RectTransform panel = KrabUi.Bordered("TargetPicker", contentHost, KrabUi.Panel, KrabUi.Line);
 			KrabUi.Vertical(panel.gameObject, 9, 6f);
@@ -1791,6 +2014,96 @@ namespace KRAB.UI
 			KrabUi.Spacer(buttons.transform);
 			KrabUi.TextButton(buttons.transform, Loc("#LOC_KRAB_ui_cancel"), CancelPicker,
 				KrabUi.Panel2, KrabUi.Muted, 12, 90f, 24f);
+		}
+
+		/// <summary>
+		/// Field list for a new Part Field source (BuildTargetFieldPicker's third branch):
+		/// KRAB_DERIVED_FIELD catalog entries applicable to each module, then that
+		/// module's own readable KSPFields (float/double/int/bool), skipping any a
+		/// catalog entry declares replaced (DerivedFieldsCatalog.IsReplaced — see
+		/// notes/design-governor-eliche.md §8.1). Picking either creates the source.
+		/// </summary>
+		private void BuildPartFieldPicker()
+		{
+			RectTransform panel = KrabUi.Bordered("TargetPicker", contentHost, KrabUi.Panel, KrabUi.Line);
+			KrabUi.Vertical(panel.gameObject, 9, 6f);
+			KrabUi.Label(panel,
+				Localizer.Format("#LOC_KRAB_ui_pickFieldOn", pickedPart.partInfo.title),
+				10, KrabUi.TanDim);
+			RectTransform list = KrabUi.ScrollList(panel, 280f);
+
+			int found = 0;
+			for (int m = 0; m < pickedPart.Modules.Count; m++)
+			{
+				PartModule candidate = pickedPart.Modules[m];
+				PartModule capturedModule = candidate;
+				List<DerivedFieldRule> derived = DerivedFieldsCatalog.RulesFor(candidate);
+				for (int d = 0; d < derived.Count; d++)
+				{
+					found++;
+					string member = derived[d].member;
+					string label = candidate.GetModuleDisplayName() + " · " + LocOr(derived[d].label, member);
+					KrabUi.TextButton(list, label,
+						() => ApplyNewPartFieldSource(capturedModule.GetPersistentId(), member),
+						KrabUi.Panel2, KrabUi.Text, 11, 0f, 22f);
+				}
+				for (int f = 0; f < candidate.Fields.Count; f++)
+				{
+					BaseField baseField = candidate.Fields[f];
+					if (baseField.FieldInfo.FieldType != typeof(float) && baseField.FieldInfo.FieldType != typeof(double)
+						&& baseField.FieldInfo.FieldType != typeof(int) && baseField.FieldInfo.FieldType != typeof(bool))
+					{
+						continue;
+					}
+					if (DerivedFieldsCatalog.IsReplaced(candidate, baseField.name))
+					{
+						continue;
+					}
+					found++;
+					string fieldName = baseField.name;
+					string label = candidate.GetModuleDisplayName() + " · "
+						+ (string.IsNullOrEmpty(baseField.guiName) ? baseField.name : Localizer.Format(baseField.guiName));
+					KrabUi.TextButton(list, label,
+						() => ApplyNewPartFieldSource(capturedModule.GetPersistentId(), fieldName),
+						KrabUi.Panel2, KrabUi.Text, 11, 0f, 22f);
+				}
+			}
+			if (found == 0)
+			{
+				KrabUi.Label(list, Loc("#LOC_KRAB_ui_noBindables"), 12, KrabUi.Muted);
+			}
+
+			GameObject buttons = KrabUi.Go("Buttons", panel);
+			KrabUi.Horizontal(buttons, 0, 8f);
+			KrabUi.TextButton(buttons.transform, Loc("#LOC_KRAB_ui_pickAnother"),
+				() =>
+				{
+					KrabNode capturedTarget = pickerTarget;
+					int capturedPort = pickerPort;
+					ClearPickerState();
+					pickerTarget = capturedTarget;
+					pickerPort = capturedPort;
+					StartPartFieldPick();
+				},
+				KrabUi.Panel2, KrabUi.Text, 12, 0f, 24f);
+			KrabUi.Spacer(buttons.transform);
+			KrabUi.TextButton(buttons.transform, Loc("#LOC_KRAB_ui_cancel"), CancelPicker,
+				KrabUi.Panel2, KrabUi.Muted, 12, 90f, 24f);
+		}
+
+		private void ApplyNewPartFieldSource(uint moduleId, string fieldName)
+		{
+			KrabNode target = pickerTarget;
+			int port = pickerPort;
+			Part part = pickedPart;
+			ClearPickerState();
+			Mutate(() =>
+			{
+				KrabNode source = KrabGraphEdits.ReplaceTermWithSource(Graph, target, port, "PartField");
+				source.SetParam("persistentId", part.persistentId.ToString());
+				source.SetParam("moduleId", moduleId.ToString());
+				source.SetParam("fieldName", fieldName);
+			});
 		}
 
 		private void ApplyTarget(uint moduleId, string bindingName)

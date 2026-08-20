@@ -282,4 +282,88 @@ namespace KRAB.Graph.Evaluation
 			Output = ctx.vessel != null && ctx.vessel.ActionGroups[group] ? 1f : 0f;
 		}
 	}
+
+	/// <summary>
+	/// Reads a numeric/bool field of a specific part+module, chosen with the same
+	/// "Pick target…" scene gesture AxisOutput uses (KrabEditorWindow). Prefers a
+	/// KRAB_DERIVED_FIELD catalog entry (DerivedFieldsCatalog) over PartModule.Fields
+	/// when one applies to the resolved module: some stock readouts only refresh while
+	/// their part's PAW is open (verified on decompiled source,
+	/// notes/design-governor-eliche.md §8.1 — ModuleRoboticServoRotor.currentRPM is the
+	/// motivating case). Re-resolved on vessel change only, same cadence as AxisOutput.
+	/// </summary>
+	public class PartFieldRuntime : RuntimeNode
+	{
+		private uint persistentId;
+		private uint moduleId;
+		private string fieldName;
+
+		private BaseField field;
+		private DerivedFieldRule derivedRule;
+		private PartModule derivedModule;
+
+		public bool IsBound => field != null || derivedRule != null;
+
+		public override bool OnCompiled()
+		{
+			uint.TryParse(Definition.GetString("persistentId", "0"), out persistentId);
+			uint.TryParse(Definition.GetString("moduleId", "0"), out moduleId);
+			fieldName = Definition.GetString("fieldName", "");
+			return true;
+		}
+
+		/// <summary>Bind to the live part/module/field; same lookup rules as AxisOutputRuntime.</summary>
+		public void ResolveTarget(Vessel vessel)
+		{
+			field = null;
+			derivedRule = null;
+			derivedModule = null;
+			if (persistentId == 0 || moduleId == 0 || string.IsNullOrEmpty(fieldName) || vessel == null)
+			{
+				return; // unbound by design (e.g. freshly authored source)
+			}
+			if (!FlightGlobals.FindLoadedPart(persistentId, out Part targetPart) || targetPart.vessel != vessel)
+			{
+				Debug.LogWarningFormat("[KRAB] source '{0}': target part {1} not found on vessel", Definition.id, persistentId);
+				return;
+			}
+			PartModule targetModule = targetPart.Modules[moduleId];
+			if (targetModule == null)
+			{
+				Debug.LogWarningFormat("[KRAB] source '{0}': module {1} not found on part {2}",
+					Definition.id, moduleId, targetPart.name);
+				return;
+			}
+			if (DerivedFieldsCatalog.TryFind(targetModule, fieldName, out DerivedFieldRule rule))
+			{
+				derivedRule = rule;
+				derivedModule = targetModule;
+				return;
+			}
+			field = targetModule.Fields[fieldName];
+			if (field == null)
+			{
+				Debug.LogWarningFormat("[KRAB] source '{0}': field '{1}' not found on part {2}",
+					Definition.id, fieldName, targetPart.name);
+			}
+		}
+
+		public override void Evaluate(EvalContext ctx)
+		{
+			if (TrySimOverride(ctx))
+			{
+				return;
+			}
+			if (derivedRule != null)
+			{
+				Output = DerivedFieldsCatalog.ReadValue(derivedRule, derivedModule);
+			}
+			else if (field != null)
+			{
+				Output = Convert.ToSingle(field.GetValue(field.host));
+			}
+			// Unresolved: Output holds its last value (0 initially) — same "nothing to
+			// write" behavior as an unbound AxisOutput, no special-casing needed.
+		}
+	}
 }

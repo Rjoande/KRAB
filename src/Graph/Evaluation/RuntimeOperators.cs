@@ -241,6 +241,52 @@ namespace KRAB.Graph.Evaluation
 		}
 	}
 
+	/// <summary>
+	/// Integrator: Output += In(0) * deltaTime. Composable primitive, not a monolithic
+	/// PID — a PI controller is a Weighted Sum of a proportional term and this node's
+	/// output, with the gains living as that sum's weights, not as parameters here
+	/// (design doc §5/§7). clampMin/clampMax (absent = unclamped, same param names and
+	/// "optional" convention as Weighted Sum's own clamp) are anti-windup, not an
+	/// extra: without them a persistent error — pala a fondo corsa, motore spento —
+	/// grows the accumulator without bound. Port 1 = reset, same >= 0.5 convention as
+	/// Hold's latch reset: while held, the accumulator stays at exactly 0 instead of
+	/// integrating (wire a DEFAULT 0 when unused, same as Hold's reset port). State is
+	/// deliberately NOT persisted to ConfigNode — like every other stateful filter, it
+	/// resets to zero on load and the controller reconverges (design doc §5).
+	/// </summary>
+	public class IntegratorRuntime : RuntimeNode
+	{
+		private bool clamp;
+		private float clampMin;
+		private float clampMax;
+		private float accumulator;
+
+		public override bool OnCompiled()
+		{
+			clamp = Definition.HasParam("clampMin") || Definition.HasParam("clampMax");
+			clampMin = Definition.GetFloat("clampMin", float.MinValue);
+			clampMax = Definition.GetFloat("clampMax", float.MaxValue);
+			return true;
+		}
+
+		public override void Evaluate(EvalContext ctx)
+		{
+			if (AsBool(In(1)))
+			{
+				accumulator = 0f;
+			}
+			else
+			{
+				accumulator += In(0) * ctx.deltaTime;
+				if (clamp)
+				{
+					accumulator = Mathf.Clamp(accumulator, clampMin, clampMax);
+				}
+			}
+			Output = accumulator;
+		}
+	}
+
 	public class ComparatorRuntime : RuntimeNode
 	{
 		private float threshold;

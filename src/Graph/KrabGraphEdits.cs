@@ -133,7 +133,7 @@ namespace KRAB.Graph
 		/// no way at all to add one from the editor (found while writing the fase-2
 		/// test protocol, 2026-07-10 — a real gap, not a design choice).
 		/// </summary>
-		public static readonly string[] InsertableFilters = { "Remap", "Derivative", "SlewRate", "Comparator", "Hold" };
+		public static readonly string[] InsertableFilters = { "Remap", "Derivative", "Integrator", "SlewRate", "Comparator", "Hold" };
 
 		/// <summary>
 		/// Add a nested sub-group term of the given subtype (the "visual parentheses"),

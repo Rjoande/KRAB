@@ -51,6 +51,7 @@ namespace KRAB.Graph
 			Register(new SubtypeInfo("ScriptAxis", NodeKind.Source, 0));
 			Register(new SubtypeInfo("PhysicalState", NodeKind.Source, 0));
 			Register(new SubtypeInfo("ActionGroupState", NodeKind.Source, 0));
+			Register(new SubtypeInfo("PartField", NodeKind.Source, 0));
 			// Operators
 			Register(new SubtypeInfo("WeightedSum", NodeKind.Operator, -1, 1));
 			Register(new SubtypeInfo("Product", NodeKind.Operator, -1, 2));
@@ -59,6 +60,7 @@ namespace KRAB.Graph
 			Register(new SubtypeInfo("Remap", NodeKind.Operator, 1));
 			Register(new SubtypeInfo("GatedBlend", NodeKind.Operator, 3));
 			Register(new SubtypeInfo("Derivative", NodeKind.Operator, 1));
+			Register(new SubtypeInfo("Integrator", NodeKind.Operator, 2));
 			Register(new SubtypeInfo("SlewRate", NodeKind.Operator, 1));
 			Register(new SubtypeInfo("Comparator", NodeKind.Operator, 1));
 			Register(new SubtypeInfo("Hold", NodeKind.Operator, 3));

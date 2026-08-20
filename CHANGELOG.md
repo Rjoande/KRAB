@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.0]
+
+### Added
+
+- **Part Field source**: read a live numeric or on/off field from a specific part+module — the first KRAB source that reads *from* a part instead of only writing to one. Same "click a part in the scene" gesture as an output's target. A small built-in set of "derived fields" (`Config/DerivedFields.cfg`, ModuleManager-extensible from any mod) works around a handful of stock fields that only refresh while their part's right-click menu happens to be open — covers a Breaking Ground rotor's RPM, a hinge/rotation servo's angle, and a control surface's angle of attack.
+- **Integrator filter**: accumulates its input over time, for building closed-loop regulators (PI/PID) directly in the graph — the integral gain lives in a downstream Weighted Sum's weight, not in the node itself. A second port resets the accumulator on demand.
+- **Anti-windup clamp, now editable in the window**: Weighted Sum and Integrator can both be given a min/max clamp on their result without hand-editing the save file — one button adds the pair (wide open by default), one ✕ removes them together.
+- **Preliminary MFD Extension compatibility**: if [MFD Extension](https://github.com/Rjoande/MFD-Extension) and Avionics Systems (MAS) are both installed, KRAB registers a bay on the shared IVA monitor. Today it's a hello-world page proving the integration end-to-end; real KRAB telemetry content is still to come.
+
+### Fixed
+
+- The editor window now hides with **F2** (hide UI) and **Esc** (pause menu), like every other in-game window (it used to stay on screen through both).
+
+### Notes
+
+These came out of an extended attempt to build a constant-speed propeller governor entirely from a KRAB graph. The governor itself never reached a configuration that held up smoothly across the full throttle range, so it isn't shipped as a documented recipe in this release, but every primitive it needed along the way turned out to be generally useful, and all of them are in this changelog.
+
 ## [0.2.0]
 
 ### Added
