@@ -64,6 +64,14 @@ namespace KRAB.Graph
 			Register(new SubtypeInfo("SlewRate", NodeKind.Operator, 1));
 			Register(new SubtypeInfo("Comparator", NodeKind.Operator, 1));
 			Register(new SubtypeInfo("Hold", NodeKind.Operator, 3));
+			// Trigonometry (degrees in/out, matching every other angle in KRAB — AoA, deployAngle...)
+			Register(new SubtypeInfo("Sin", NodeKind.Operator, 1));
+			Register(new SubtypeInfo("Cos", NodeKind.Operator, 1));
+			Register(new SubtypeInfo("Tan", NodeKind.Operator, 1));
+			Register(new SubtypeInfo("Asin", NodeKind.Operator, 1));
+			Register(new SubtypeInfo("Acos", NodeKind.Operator, 1));
+			Register(new SubtypeInfo("Atan", NodeKind.Operator, 1));
+			Register(new SubtypeInfo("Atan2", NodeKind.Operator, 2));
 			// Logic gates (boolean convention: >= 0.5 is true, outputs are exactly 0/1)
 			Register(new SubtypeInfo("And", NodeKind.Operator, -1, 2));
 			Register(new SubtypeInfo("Or", NodeKind.Operator, -1, 2));

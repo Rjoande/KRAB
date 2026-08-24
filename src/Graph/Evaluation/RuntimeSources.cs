@@ -180,7 +180,14 @@ namespace KRAB.Graph.Evaluation
 			AtmDensity,
 			GForce,
 			ExternalTemperature,
-			AngularVelocityMag
+			AngularVelocityMag,
+			PitchRate,
+			RollRate,
+			YawRate,
+			Mass,
+			Pitch,
+			Bank,
+			Heading
 		}
 
 		private Metric metric;
@@ -250,9 +257,38 @@ namespace KRAB.Graph.Evaluation
 				case Metric.AtmDensity: return (float)vessel.atmDensity;
 				case Metric.GForce: return (float)vessel.geeForce;
 				case Metric.ExternalTemperature: return (float)vessel.externalTemperature;
-				case Metric.AngularVelocityMag: return vessel.angularVelocity.magnitude;
+				case Metric.AngularVelocityMag: return vessel.angularVelocity.magnitude * Mathf.Rad2Deg;
+				// x/y/z = pitch/roll/yaw, confirmed on decompiled source: ModuleReactionWheel
+				// builds its torque vector as (ctrlState.pitch, ctrlState.roll, ctrlState.yaw),
+				// and stock SAS (VesselAutopilot) reads vessel.angularVelocity.x/.y/.z with that
+				// same axis assignment for its own rate damping. Same sign convention as the
+				// PlayerAxis/ScriptAxis Pitch/Roll/Yaw channels already in KRAB, for free.
+				// angularVelocity itself is in rad/s (Unity's native Rigidbody convention);
+				// converted to deg/s here since every other angle in KRAB is in degrees.
+				case Metric.PitchRate: return vessel.angularVelocity.x * Mathf.Rad2Deg;
+				case Metric.RollRate: return vessel.angularVelocity.y * Mathf.Rad2Deg;
+				case Metric.YawRate: return vessel.angularVelocity.z * Mathf.Rad2Deg;
+				case Metric.Mass: return (float)vessel.totalMass;
+				// Same formula stock uses for its own Aero GUI debug readout (AeroGUI.cs,
+				// F12 > Aero Data), ported from Vessel.north/upAxis instead of the single
+				// active-vessel-only NavBall (KRAB-9000 CLAUDE.md #73) — works for any
+				// loaded vessel, matches what the player sees on their own navball for the
+				// active one. Pitch/bank wrapped to -180..180 (0 = level); heading 0..360.
+				case Metric.Pitch: return AttitudeAngles(vessel).x;
+				case Metric.Bank: return AttitudeAngles(vessel).z;
+				case Metric.Heading: return AttitudeAngles(vessel).y;
 				default: return 0f;
 			}
+		}
+
+		private static Vector3 AttitudeAngles(Vessel vessel)
+		{
+			Quaternion horizon = Quaternion.LookRotation(vessel.north, vessel.upAxis);
+			Quaternion attitude = Quaternion.Inverse(Quaternion.Euler(90f, 0f, 0f)
+				* Quaternion.Inverse(vessel.ReferenceTransform.rotation) * horizon);
+			float pitch = attitude.eulerAngles.x <= 180f ? -attitude.eulerAngles.x : 360f - attitude.eulerAngles.x;
+			float bank = attitude.eulerAngles.z <= 180f ? attitude.eulerAngles.z : attitude.eulerAngles.z - 360f;
+			return new Vector3(pitch, attitude.eulerAngles.y, bank);
 		}
 	}
 

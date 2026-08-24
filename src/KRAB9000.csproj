@@ -6,7 +6,7 @@
     <LangVersion>8.0</LangVersion>
     <AssemblyName>KRAB9000</AssemblyName>
     <RootNamespace>KRAB</RootNamespace>
-    <Version>0.3.0</Version>
+    <Version>0.4.0</Version>
     <DebugType>none</DebugType>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>

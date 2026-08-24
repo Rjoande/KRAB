@@ -260,6 +260,13 @@ namespace KRAB.Graph.Evaluation
 				case "Integrator": return new IntegratorRuntime();
 				case "SlewRate": return new SlewRateRuntime();
 				case "Comparator": return new ComparatorRuntime();
+				case "Sin": return new SinRuntime();
+				case "Cos": return new CosRuntime();
+				case "Tan": return new TanRuntime();
+				case "Asin": return new AsinRuntime();
+				case "Acos": return new AcosRuntime();
+				case "Atan": return new AtanRuntime();
+				case "Atan2": return new Atan2Runtime();
 				case "Hold": return new HoldRuntime();
 				case "And": return new AndRuntime();
 				case "Or": return new OrRuntime();

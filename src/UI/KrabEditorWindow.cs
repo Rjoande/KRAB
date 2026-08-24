@@ -41,6 +41,16 @@ namespace KRAB.UI
 		// plain in-memory clipboard, not persisted; cleared on a KSP restart.
 		private static string subtreeClipboard;
 
+		// Footer toggles (in-game request, 2026-08-20), both session-scoped the same
+		// way: survive closing/reopening the window, reset on a KSP restart.
+		private static bool showNodeIds;
+		private static bool invertHighlightPriority;
+
+		// Last on-screen position (top-center, matching windowRect's own pivot), so
+		// reopening the window lands where it was left instead of snapping back to the
+		// default (in-game request, 2026-08-23). Session-scoped, not persisted.
+		private static Vector2? lastWindowPosition;
+
 		private ModuleKRABController module;
 		private RectTransform windowRect;
 		private Transform contentHost;
@@ -106,15 +116,30 @@ namespace KRAB.UI
 		private bool pickingPart;
 		private Part pickedPart;
 		private Part hoverPart;
+		// hoverPart's whole symmetry group during a scene pick (point 1, 2026-08-20 —
+		// same "preview the whole group" behavior as KRILL): hoverPart itself is still
+		// tracked separately since it's what a click actually confirms.
+		private readonly List<Part> hoverGroup = new List<Part>();
 		// Captured on mouse-down, confirmed on mouse-up (see HandlePartPicking).
 		private Part pendingPickPart;
 		private const string PickLockId = "KRAB_EDITOR_PICK";
 
-		// Persistent highlight on the active output tab's bound target part (in-game
-		// request, 2026-07-24; same mechanism as KRILL's KrillWindow — same color,
-		// same "don't clobber it with the transient pick-hover" guard).
-		private Part highlightedPart;
+		// Persistent highlight on the active output tab's tree (in-game request,
+		// 2026-07-24, extended 2026-08-20 to cover symmetry siblings and Part Field
+		// sources, not just the single bound target — same base mechanism as KRILL's
+		// KrillWindow, same "don't clobber it with the transient pick-hover" guard).
+		// Two families, each with a direct/kinship pair: Target = this output's bound
+		// part; Source = every part a Part Field in this output's tree actually reads
+		// from ("which part feeds THIS output" — scoped to the active tab on purpose).
+		// Kinship uses a distinct hue, not just a dimmer version of the direct color —
+		// a desaturated blue read as "the same thing, fainter" in review. Default
+		// priority is target-family over source-family; invertHighlightPriority (footer
+		// toggle) flips it for players who want to eyeball sources instead.
+		private readonly Dictionary<Part, Color> highlightedParts = new Dictionary<Part, Color>();
 		private static readonly Color TargetHighlightColor = new Color(0.18f, 0.35f, 0.85f);
+		private static readonly Color TargetKinshipColor = new Color(0.42f, 0.28f, 0.82f);
+		private static readonly Color SourceHighlightColor = new Color(0.16f, 0.62f, 0.34f);
+		private static readonly Color SourceKinshipColor = new Color(0.38f, 0.66f, 0.42f);
 
 		private static readonly string[] Channels =
 		{
@@ -126,7 +151,9 @@ namespace KRAB.UI
 		{
 			"SrfSpeed", "HorizontalSrfSpeed", "VerticalSpeed", "IndicatedAirSpeed", "Mach",
 			"AltitudeASL", "AltitudeRadar", "DynamicPressure", "StaticPressure", "AtmDensity",
-			"GForce", "ExternalTemperature", "AngularVelocityMag"
+			"GForce", "ExternalTemperature", "AngularVelocityMag",
+			"PitchRate", "RollRate", "YawRate", "Mass",
+			"Pitch", "Bank", "Heading"
 		};
 
 		private static readonly string[] ActionGroupNames =
@@ -158,8 +185,12 @@ namespace KRAB.UI
 
 		private void OnDestroy()
 		{
+			if (windowRect != null)
+			{
+				lastWindowPosition = windowRect.anchoredPosition;
+			}
 			ClearPickerState();
-			ClearTargetHighlight();
+			ClearAllPartHighlights();
 			KrabCurveWindow.CloseAny(); // a curve window points into this editor's graph — don't leave it floating
 			InputLockManager.RemoveControlLock(InputLockId);
 			GameEvents.onGameSceneLoadRequested.Remove(OnSceneChange);
@@ -185,7 +216,7 @@ namespace KRAB.UI
 		/// a stale highlight on a part from a no-longer-relevant ship).</summary>
 		private void OnActiveVesselChanged(Vessel v)
 		{
-			UpdateTargetHighlight();
+			UpdatePartHighlights();
 		}
 
 		// Independent flags: F2 and Esc can each be toggled on their own, the window
@@ -260,6 +291,15 @@ namespace KRAB.UI
 		/// <summary>Localized detail of a source node's selection (channel/metric/group/slot/value).</summary>
 		private static string SourceDetail(KrabNode node)
 		{
+			return SourceDetail(node, PartFieldLabelMaxChars);
+		}
+
+		/// <summary>partFieldMaxChars lets a caller ask for the untruncated text (pass
+		/// int.MaxValue) — used by NodeFullLabel for the "what does this really say"
+		/// tooltip (in-game request, 2026-08-21). Every other case here is never
+		/// truncated regardless, so the parameter is simply unused for them.</summary>
+		private static string SourceDetail(KrabNode node, int partFieldMaxChars)
+		{
 			switch (node.Info.name)
 			{
 				case "PlayerAxis":
@@ -288,7 +328,7 @@ namespace KRAB.UI
 					// Whole "part - field" pair truncated together, not each half on its
 					// own (in-game feedback, 2026-08-14: the per-output 15-char rule left
 					// this too long and it overran the simulator slider row).
-					return Truncate(pfPart.partInfo.title + " - " + pfLabel, PartFieldLabelMaxChars);
+					return Truncate(pfPart.partInfo.title + " - " + pfLabel, partFieldMaxChars);
 				default:
 					return "";
 			}
@@ -304,14 +344,51 @@ namespace KRAB.UI
 		/// </summary>
 		private static string NodeLabel(KrabNode node)
 		{
+			return NodeLabel(node, PartFieldLabelMaxChars);
+		}
+
+		private static string NodeLabel(KrabNode node, int partFieldMaxChars)
+		{
 			string detail = node.IsKnown && node.Info.kind == NodeKind.Operator
 				? DescribeOperator(node)
-				: SourceDetail(node);
+				: SourceDetail(node, partFieldMaxChars);
 			if (node.IsKnown && node.Info.name == "PartField")
 			{
 				return detail;
 			}
 			return NodeName(node) + " · " + detail;
+		}
+
+		/// <summary>The untruncated version of NodeLabel, for a tooltip on whatever
+		/// might have been cut short (in-game request, 2026-08-21) — today only Part
+		/// Field's "part - field" pair can actually be shorter than this.</summary>
+		private static string NodeFullLabel(KrabNode node)
+		{
+			return NodeLabel(node, int.MaxValue);
+		}
+
+		/// <summary>Node id suffix ("n4"-style). Always shown in the REUSE A SIGNAL
+		/// list — that's the one place it was already load-bearing (in-game feedback,
+		/// 2026-08-20: picking the right node in a complex/multi-output graph is a
+		/// guess without it) — and gated behind the footer's id toggle everywhere
+		/// else, where it's convenience rather than the only way to tell nodes apart.</summary>
+		private static string IdSuffix(KrabNode node)
+		{
+			return " [" + node.id + "]";
+		}
+
+		/// <summary>Simulator row label: NodeLabel plus the id suffix when shown,
+		/// capped to fit the row's fixed-width column next to the slider — tighter by
+		/// SimulatorLabelIdMargin while ids are on, since the "[nX]" suffix was long
+		/// enough to run the whole label into the slider (in-game feedback,
+		/// 2026-08-21). Local to the simulator on purpose: the tree row and REUSE A
+		/// SIGNAL list have more room and aren't affected.</summary>
+		private static string SimulatorRowLabel(KrabNode node)
+		{
+			string label = NodeLabel(node);
+			int budget = SimulatorLabelMaxChars - (showNodeIds ? SimulatorLabelIdMargin : 0);
+			label = Truncate(label, budget);
+			return showNodeIds ? label + IdSuffix(node) : label;
 		}
 
 		// -------------------------------------------------------------- mutation
@@ -420,9 +497,14 @@ namespace KRAB.UI
 			gameObject.AddComponent<GraphicRaycaster>();
 
 			windowRect = KrabUi.Bordered("Window", transform, KrabUi.Win, KrabUi.Line);
+			// Top-anchored (in-game report, 2026-08-23): with a centered pivot, growing
+			// the window via ContentSizeFitter (more nodes = taller content) pushed the
+			// titlebar upward by half the added height, risking it off-screen if the
+			// window was already near the top. Anchoring pivot+position to the top edge
+			// means growth only ever extends downward — the titlebar is the fixed point.
 			windowRect.anchorMin = windowRect.anchorMax = new Vector2(0.5f, 0.5f);
-			windowRect.pivot = new Vector2(0.5f, 0.5f);
-			windowRect.anchoredPosition = new Vector2(160f, 20f);
+			windowRect.pivot = new Vector2(0.5f, 1f);
+			windowRect.anchoredPosition = lastWindowPosition ?? new Vector2(160f, 70f);
 			windowRect.sizeDelta = new Vector2(WindowWidth, 100f);
 			FocusLock focus = windowRect.gameObject.AddComponent<FocusLock>();
 			focus.lockId = InputLockId;
@@ -502,7 +584,7 @@ namespace KRAB.UI
 
 			if (Graph == null)
 			{
-				ClearTargetHighlight();
+				ClearAllPartHighlights();
 				KrabUi.Label(contentHost, Loc("#LOC_KRAB_ui_noGraph"), 13, KrabUi.Muted, TextAnchor.MiddleCenter);
 				Button create = KrabUi.TextButton(contentHost, Loc("#LOC_KRAB_ui_createGraph"),
 					() => { module.CreateEmptyGraph(); RebuildContent(); },
@@ -515,7 +597,7 @@ namespace KRAB.UI
 			Validate();
 			CollectOutputs();
 			BuildPortLookups();
-			UpdateTargetHighlight();
+			UpdatePartHighlights();
 
 			// Picker modes replace tabs/tree/simulator until resolved or cancelled.
 			if ((pickerKind != PickerKind.None || pickingPart)
@@ -660,10 +742,31 @@ namespace KRAB.UI
 				string id = node.id;
 				bool active = id == activeOutputId;
 				string marker = node.Info.name == "AxisOutput" ? "◉ " : "▲ ";
-				KrabUi.TextButton(strip, marker + TabTitle(node),
+				Button tab = KrabUi.TextButton(strip, marker + TabTitle(node),
 					() => { activeOutputId = id; RebuildContent(); },
 					active ? KrabUi.Panel2 : KrabUi.Panel,
-					active ? KrabUi.Text : KrabUi.Muted, 12, 0f, 26f);
+					active ? KrabUi.GreenHi : KrabUi.Muted, 12, 0f, 26f);
+				if (active)
+				{
+					// Panel2 vs Panel alone read as almost the same shade (in-game
+					// feedback, 2026-08-20) — a bottom accent strip plus the marker/text
+					// tint above are the two changes together, not either alone. Pivot
+					// (0.5, 1) + a small negative Y anchors the strip's TOP just below the
+					// button's own bottom edge, so it hangs entirely outside the button
+					// instead of eating into its 3px bottom padding — the first version
+					// grew upward from the edge and clipped through the label's text
+					// (in-game feedback, 2026-08-20).
+					RectTransform accent = (RectTransform)KrabUi.Go("ActiveAccent", tab.transform).transform;
+					accent.anchorMin = new Vector2(0f, 0f);
+					accent.anchorMax = new Vector2(1f, 0f);
+					accent.pivot = new Vector2(0.5f, 1f);
+					accent.anchoredPosition = new Vector2(0f, -1f);
+					accent.sizeDelta = new Vector2(0f, 2f);
+					Image accentImage = accent.gameObject.AddComponent<Image>();
+					accentImage.color = KrabUi.GreenHi;
+					accentImage.raycastTarget = false;
+					accent.gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
+				}
 			}
 
 			KrabUi.TextButton(row.transform, Loc("#LOC_KRAB_ui_addAxis"),
@@ -781,9 +884,9 @@ namespace KRAB.UI
 			KrabUi.Size(paramRow, -1f, 20f);
 			if (output.Info.name == "AxisOutput")
 			{
-				ParamLabel(paramRow.transform, "inMin");
+				ParamLabel(paramRow.transform, "inMin", "#LOC_KRAB_tip_paramInRange");
 				NumberField(paramRow.transform, output, "inMin", "0");
-				ParamLabel(paramRow.transform, "inMax");
+				ParamLabel(paramRow.transform, "inMax", "#LOC_KRAB_tip_paramInRange");
 				NumberField(paramRow.transform, output, "inMax", "1");
 			}
 			else
@@ -880,6 +983,13 @@ namespace KRAB.UI
 
 		private const int TargetLabelMaxChars = 15;
 		private const int PartFieldLabelMaxChars = 35;
+		// Simulator row label column: fixed-width, sits right next to the slider — an
+		// overlong label runs into it. 35 already matched this column's width when
+		// PartFieldLabelMaxChars was tuned; the extra -3 margin when node ids are shown
+		// makes room for the "[nX]" suffix, which pushed some labels over the edge
+		// (in-game feedback, 2026-08-21).
+		private const int SimulatorLabelMaxChars = 35;
+		private const int SimulatorLabelIdMargin = 3;
 
 		/// <summary>Caps a string to TargetLabelMaxChars total, ellipsizing the tail
 		/// (in-game request, 2026-07-24: long part/field names could stretch the
@@ -1128,10 +1238,11 @@ namespace KRAB.UI
 				// Source leaves: name + selection open the grouped source picker (M3).
 				KrabNode capturedParent = parentGroup;
 				int capturedSlot = port;
-				KrabUi.TextButton(row.transform,
-					NodeLabel(node) + " ▾",
+				Button sourceButton = KrabUi.TextButton(row.transform,
+					NodeLabel(node) + (showNodeIds ? IdSuffix(node) : "") + " ▾",
 					() => OpenSourcePicker(capturedParent, capturedSlot),
 					KrabUi.Inset, NodeColor(node, false), 12, 0f, 20f);
+				KrabUi.Tooltip(sourceButton.gameObject, NodeFullLabel(node));
 			}
 			else
 			{
@@ -1234,10 +1345,14 @@ namespace KRAB.UI
 
 		// ---------------------------------------------------------- param editing
 
-		private void ParamLabel(Transform parent, string text)
+		private void ParamLabel(Transform parent, string text, string tipKey = null)
 		{
 			Text label = KrabUi.Label(parent, text, 10, KrabUi.Muted);
 			KrabUi.Size(label.gameObject, -1f, 20f);
+			if (tipKey != null)
+			{
+				KrabUi.Tooltip(label.gameObject, tipKey);
+			}
 		}
 
 		private void NumberField(Transform parent, KrabNode node, string param, string fallback, float width = 50f)
@@ -1282,14 +1397,15 @@ namespace KRAB.UI
 		{
 			if (!node.HasParam("clampMin") && !node.HasParam("clampMax"))
 			{
-				KrabUi.TextButton(parent, Loc("#LOC_KRAB_ui_addClamp"), () => Mutate(() =>
+				Button addClamp = KrabUi.TextButton(parent, Loc("#LOC_KRAB_ui_addClamp"), () => Mutate(() =>
 				{
 					node.SetParam("clampMin", -1000f);
 					node.SetParam("clampMax", 1000f);
 				}), KrabUi.Panel2, KrabUi.Tan, 11, 0f, 20f);
+				KrabUi.Tooltip(addClamp.gameObject, "#LOC_KRAB_tip_addClamp");
 				return;
 			}
-			ParamLabel(parent, "clamp");
+			ParamLabel(parent, "clamp", "#LOC_KRAB_tip_paramClamp");
 			NumberField(parent, node, "clampMin", "-1000", 44f);
 			NumberField(parent, node, "clampMax", "1000", 44f);
 			Button removeClamp = KrabUi.IconButton(parent, "✕", () => Mutate(() =>
@@ -1326,13 +1442,13 @@ namespace KRAB.UI
 					// (in-game feedback, 2026-07-09 — "typed a number, nothing happened").
 					if (!Simulated)
 					{
-						ParamLabel(parent, "s");
+						ParamLabel(parent, "s", "#LOC_KRAB_tip_paramSampleRate");
 						NumberField(parent, node, "sampleRate", "0.1", 38f);
 					}
 					BuildUnitChip(parent, node);
 					break;
 				case "WeightedSum":
-					ParamLabel(parent, "w");
+					ParamLabel(parent, "w", "#LOC_KRAB_tip_paramWeights");
 					TextField(parent, node, "weights", "1", 110f);
 					BuildClampFields(parent, node);
 					break;
@@ -1355,10 +1471,10 @@ namespace KRAB.UI
 						// was in vs out (in-game feedback, 2026-07-14) — labeled both sides.
 						// "in"/"out" alone still didn't say the two boxes were min/max
 						// (in-game feedback, 2026-07-15).
-						ParamLabel(parent, "in (min-max)");
+						ParamLabel(parent, "in (min-max)", "#LOC_KRAB_tip_paramRemapRange");
 						NumberField(parent, node, "inMin", "0", 42f);
 						NumberField(parent, node, "inMax", "1", 42f);
-						ParamLabel(parent, "out (min-max)");
+						ParamLabel(parent, "out (min-max)", "#LOC_KRAB_tip_paramRemapRange");
 						NumberField(parent, node, "outMin", "0", 42f);
 						NumberField(parent, node, "outMax", "1", 42f);
 						Button curveButton = KrabUi.ImageIconButton(parent, "curve",
@@ -1368,34 +1484,35 @@ namespace KRAB.UI
 					}
 					break;
 				case "GatedBlend":
-					ParamLabel(parent, "thr");
+					ParamLabel(parent, "thr", "#LOC_KRAB_tip_paramThreshold");
 					NumberField(parent, node, "threshold", "0.5", 44f);
-					ParamLabel(parent, "hys");
+					ParamLabel(parent, "hys", "#LOC_KRAB_tip_paramHysteresis");
 					NumberField(parent, node, "hysteresis", "0", 38f);
-					ParamLabel(parent, "band");
+					ParamLabel(parent, "band", "#LOC_KRAB_tip_paramBand");
 					NumberField(parent, node, "blendWidth", "0", 38f);
 					break;
 				case "Comparator":
-					ParamLabel(parent, "thr");
+					ParamLabel(parent, "thr", "#LOC_KRAB_tip_paramThreshold");
 					NumberField(parent, node, "threshold", "0.5", 44f);
-					ParamLabel(parent, "hys");
+					ParamLabel(parent, "hys", "#LOC_KRAB_tip_paramHysteresis");
 					NumberField(parent, node, "hysteresis", "0", 38f);
 					break;
 				case "Derivative":
-					ParamLabel(parent, "τ");
+					ParamLabel(parent, "τ", "#LOC_KRAB_tip_paramTau");
 					NumberField(parent, node, "smoothing", "0.2", 38f);
-					ParamLabel(parent, "×");
+					ParamLabel(parent, "×", "#LOC_KRAB_tip_paramScale");
 					NumberField(parent, node, "scale", "1", 38f);
 					break;
 				case "SlewRate":
 					NumberField(parent, node, "ratePerSecond", "0", 46f);
-					ParamLabel(parent, "/s");
+					ParamLabel(parent, "/s", "#LOC_KRAB_tip_paramRatePerSecond");
 					break;
 				case "Hold":
 					string mode = node.GetString("mode", "track");
-					KrabUi.TextButton(parent, mode,
+					Button modeButton = KrabUi.TextButton(parent, mode,
 						() => Mutate(() => node.SetParam("mode", mode == "track" ? "latch" : "track")),
 						KrabUi.Inset, KrabUi.Tan, 11, 0f, 20f);
+					KrabUi.Tooltip(modeButton.gameObject, "#LOC_KRAB_tip_holdMode");
 					break;
 			}
 		}
@@ -1429,8 +1546,9 @@ namespace KRAB.UI
 				KrabUi.Horizontal(row, 0, 8f);
 				KrabUi.Size(row, -1f, 20f);
 				Text label = KrabUi.Label(row.transform,
-					NodeLabel(node), 12, KrabUi.Text);
+					SimulatorRowLabel(node), 12, KrabUi.Text);
 				KrabUi.Size(label.gameObject, 200f, 20f);
+				KrabUi.Tooltip(label.gameObject, NodeFullLabel(node));
 
 				if (node.Info.name == "ActionGroupState")
 				{
@@ -1504,8 +1622,15 @@ namespace KRAB.UI
 						case "atmdensity": min = 0f; max = 1.5f; return;
 						case "gforce": min = 0f; max = 12f; return;
 						case "externaltemperature": min = 0f; max = 1500f; return;
-						case "angularvelocitymag": min = 0f; max = 5f; return;
+						case "angularvelocitymag": min = 0f; max = 300f; return;
 						case "verticalspeed": min = -300f; max = 300f; return;
+						case "pitchrate":
+						case "rollrate":
+						case "yawrate": min = -180f; max = 180f; return;
+						case "mass": min = 0f; max = 50f; return; // tons, a helicopter-sized default, not a hard cap
+						case "pitch":
+						case "bank": min = -180f; max = 180f; return;
+						case "heading": min = 0f; max = 360f; return;
 						default: min = 0f; max = 500f; return; // speeds, m/s
 					}
 				case "PartField":
@@ -1543,11 +1668,24 @@ namespace KRAB.UI
 			}
 
 			// Close now lives only in the titlebar (in-game request, 2026-07-19) — this
-			// row is just the status line.
+			// row is just the status line, plus the two session-scoped display toggles
+			// (in-game request, 2026-08-20).
 			GameObject row = KrabUi.Go("Footer", contentHost);
 			KrabUi.Horizontal(row, 0, 10f);
 			Text status = KrabUi.Label(row.transform, module.GraphStatusText, 12, KrabUi.Muted);
 			KrabUi.Size(status.gameObject, -1f, 22f, 1f);
+
+			Button idsToggle = KrabUi.TextButton(row.transform,
+				Loc(showNodeIds ? "#LOC_KRAB_ui_idsShown" : "#LOC_KRAB_ui_idsHidden"),
+				() => { showNodeIds = !showNodeIds; RebuildContent(); },
+				KrabUi.Inset, showNodeIds ? KrabUi.Tan : KrabUi.Muted, 11, 0f, 20f);
+			KrabUi.Tooltip(idsToggle.gameObject, "#LOC_KRAB_tip_toggleIds");
+
+			Button priorityToggle = KrabUi.TextButton(row.transform,
+				Loc(invertHighlightPriority ? "#LOC_KRAB_ui_prioritySource" : "#LOC_KRAB_ui_priorityTarget"),
+				() => { invertHighlightPriority = !invertHighlightPriority; UpdatePartHighlights(); },
+				KrabUi.Inset, invertHighlightPriority ? KrabUi.Tan : KrabUi.Muted, 11, 0f, 20f);
+			KrabUi.Tooltip(priorityToggle.gameObject, "#LOC_KRAB_tip_togglePriority");
 		}
 
 		// ------------------------------------------------------------ M3 pickers
@@ -1618,38 +1756,199 @@ namespace KRAB.UI
 			return part;
 		}
 
-		private void ApplyTargetHighlight()
+		/// <summary>A part's symmetry siblings only (not the part itself — callers add
+		/// that separately, at a different priority tier). Full group, no parent
+		/// filter: matches KRILL's own KrillQuery.GetSymmetryGroup semantics, verified
+		/// reliable and live, never cached (see notes/design-governor-eliche.md §6 for
+		/// why a parent filter was tried and rejected there — it breaks legitimate
+		/// mirror-symmetry cases like left/right landing gear on different parents).</summary>
+		private static HashSet<Part> SymmetryGroupOf(Part part)
 		{
-			if (highlightedPart != null)
+			HashSet<Part> result = new HashSet<Part>();
+			if (part == null || part.symmetryCounterparts == null)
 			{
-				highlightedPart.SetHighlightType(Part.HighlightType.AlwaysOn);
-				highlightedPart.SetHighlightColor(TargetHighlightColor);
-				highlightedPart.SetHighlight(true, false);
+				return result;
+			}
+			for (int i = 0; i < part.symmetryCounterparts.Count; i++)
+			{
+				if (part.symmetryCounterparts[i] != null)
+				{
+					result.Add(part.symmetryCounterparts[i]);
+				}
+			}
+			return result;
+		}
+
+		private static void ApplyTier(Dictionary<Part, Color> desired, Part part, Color color)
+		{
+			if (part != null)
+			{
+				desired[part] = color;
 			}
 		}
 
-		private void ClearTargetHighlight()
+		private static void ApplyTier(Dictionary<Part, Color> desired, HashSet<Part> parts, Color color)
 		{
-			if (highlightedPart != null)
+			foreach (Part p in parts)
 			{
-				highlightedPart.SetHighlightDefault();
-				highlightedPart = null;
+				if (p != null)
+				{
+					desired[p] = color;
+				}
 			}
 		}
 
-		/// <summary>Re-resolves the active output's target and updates the persistent
-		/// highlight only if it actually changed (called on every RebuildContent, so
-		/// this must stay cheap and idempotent).</summary>
-		private void UpdateTargetHighlight()
+		/// <summary>Every part read by a Part Field reachable from the active output's
+		/// tree — direct binds and their symmetry siblings kept separate, so direct can
+		/// outrank kin within the source family too. Scoped to the active tab on
+		/// purpose (in-game request, 2026-08-20: "quale parte sta alimentando QUESTO
+		/// output" — not every Part Field in the whole graph).</summary>
+		private void CollectSourceGroups(HashSet<Part> direct, HashSet<Part> kin)
 		{
-			Part resolved = ResolveActiveOutputTargetPart();
-			if (resolved == highlightedPart)
+			int index = FindOutputIndex(activeOutputId);
+			if (index < 0)
 			{
 				return;
 			}
-			ClearTargetHighlight();
-			highlightedPart = resolved;
-			ApplyTargetHighlight();
+			HashSet<KrabNode> visited = new HashSet<KrabNode>();
+			CollectPartFieldNodes(UpstreamAt(outputNodes[index], 0), visited, direct, kin);
+		}
+
+		/// <summary>visited guards against walking the same node twice through a
+		/// REUSE A SIGNAL fan-out (a node can feed more than one port in the same
+		/// tree).</summary>
+		private void CollectPartFieldNodes(KrabNode node, HashSet<KrabNode> visited, HashSet<Part> direct, HashSet<Part> kin)
+		{
+			if (node == null || !visited.Add(node))
+			{
+				return;
+			}
+			if (node.IsKnown && node.Info.name == "PartField" && TryResolvePartField(node, out Part part, out _))
+			{
+				direct.Add(part);
+				foreach (Part sibling in SymmetryGroupOf(part))
+				{
+					kin.Add(sibling);
+				}
+			}
+			if (!node.IsKnown || node.Info.kind != NodeKind.Operator)
+			{
+				return;
+			}
+			int ports = KrabGraphEdits.CountInputPorts(Graph, node);
+			for (int p = 0; p < ports; p++)
+			{
+				CollectPartFieldNodes(UpstreamAt(node, p), visited, direct, kin);
+			}
+		}
+
+		/// <summary>
+		/// Recomputes which parts should glow and with what color, then applies only
+		/// the diff (idempotent, called on every RebuildContent — must stay cheap).
+		/// Target family = the active output's bound part + symmetry siblings; Source
+		/// family = every part this output's tree reads from via Part Field + their
+		/// siblings. Default priority is target over source; invertHighlightPriority
+		/// (footer toggle) flips it. Direct always beats a same-family sibling, in
+		/// both priority orders — enforced by applying weakest tier first so a later
+		/// (stronger) tier's dictionary write overwrites it.
+		/// </summary>
+		private void UpdatePartHighlights()
+		{
+			Part target = ResolveActiveOutputTargetPart();
+			HashSet<Part> targetKin = SymmetryGroupOf(target);
+			HashSet<Part> sourceDirect = new HashSet<Part>();
+			HashSet<Part> sourceKin = new HashSet<Part>();
+			CollectSourceGroups(sourceDirect, sourceKin);
+
+			Dictionary<Part, Color> desired = new Dictionary<Part, Color>();
+			if (invertHighlightPriority)
+			{
+				ApplyTier(desired, targetKin, TargetKinshipColor);
+				ApplyTier(desired, target, TargetHighlightColor);
+				ApplyTier(desired, sourceKin, SourceKinshipColor);
+				ApplyTier(desired, sourceDirect, SourceHighlightColor);
+			}
+			else
+			{
+				ApplyTier(desired, sourceKin, SourceKinshipColor);
+				ApplyTier(desired, sourceDirect, SourceHighlightColor);
+				ApplyTier(desired, targetKin, TargetKinshipColor);
+				ApplyTier(desired, target, TargetHighlightColor);
+			}
+
+			List<Part> stale = null;
+			foreach (KeyValuePair<Part, Color> kv in highlightedParts)
+			{
+				if (!desired.ContainsKey(kv.Key))
+				{
+					if (stale == null)
+					{
+						stale = new List<Part>();
+					}
+					stale.Add(kv.Key);
+				}
+			}
+			if (stale != null)
+			{
+				for (int i = 0; i < stale.Count; i++)
+				{
+					highlightedParts.Remove(stale[i]);
+					if (!hoverGroup.Contains(stale[i]))
+					{
+						stale[i].SetHighlightDefault();
+					}
+				}
+			}
+			foreach (KeyValuePair<Part, Color> kv in desired)
+			{
+				if (highlightedParts.TryGetValue(kv.Key, out Color current) && current == kv.Value)
+				{
+					continue;
+				}
+				highlightedParts[kv.Key] = kv.Value;
+				if (hoverGroup.Contains(kv.Key))
+				{
+					continue; // the transient cyan hover wins on screen while it lasts
+				}
+				kv.Key.SetHighlightType(Part.HighlightType.AlwaysOn);
+				kv.Key.SetHighlightColor(kv.Value);
+				kv.Key.SetHighlight(true, false);
+			}
+		}
+
+		private void ClearAllPartHighlights()
+		{
+			foreach (KeyValuePair<Part, Color> kv in highlightedParts)
+			{
+				if (!hoverGroup.Contains(kv.Key))
+				{
+					kv.Key.SetHighlightDefault();
+				}
+			}
+			highlightedParts.Clear();
+		}
+
+		/// <summary>Restores a part's persistent highlight color if it still has one,
+		/// otherwise clears it to default — used when the transient pick-hover moves
+		/// off a part, so it doesn't erase a real target/source highlight underneath
+		/// (same guard KRILL needed porting this exact mechanism, generalized here
+		/// from a single tracked part to a dictionary of them).</summary>
+		private void RestoreOrClearHighlight(Part part)
+		{
+			if (part == null)
+			{
+				return;
+			}
+			if (highlightedParts.TryGetValue(part, out Color color))
+			{
+				part.SetHighlightType(Part.HighlightType.AlwaysOn);
+				part.SetHighlightColor(color);
+				part.SetHighlight(true, false);
+			}
+			else
+			{
+				part.SetHighlightDefault();
+			}
 		}
 
 		private void ClearPickerState()
@@ -1660,21 +1959,12 @@ namespace KRAB.UI
 			pickerNewSourceSubtype = null;
 			pickedPart = null;
 			pendingPickPart = null;
-			if (hoverPart != null)
+			for (int i = 0; i < hoverGroup.Count; i++)
 			{
-				// Un-hovering the part that's ALSO the persistent target highlight must
-				// restore the blue highlight, not clear it to default (same fix KRILL
-				// needed porting this exact mechanism — see the bug report).
-				if (hoverPart == highlightedPart)
-				{
-					ApplyTargetHighlight();
-				}
-				else
-				{
-					hoverPart.SetHighlightDefault();
-				}
-				hoverPart = null;
+				RestoreOrClearHighlight(hoverGroup[i]);
 			}
+			hoverGroup.Clear();
+			hoverPart = null;
 			InputLockManager.RemoveControlLock(PickLockId);
 		}
 
@@ -1743,32 +2033,37 @@ namespace KRAB.UI
 			}
 			if (hovered != hoverPart)
 			{
-				if (hoverPart != null)
+				// Same guard as ClearPickerState: don't erase a persistent target/source
+				// highlight just because the transient pick-hover moved off of it.
+				for (int i = 0; i < hoverGroup.Count; i++)
 				{
-					// Same guard as ClearPickerState: don't erase the persistent target
-					// highlight just because the transient pick-hover moved off of it.
-					if (hoverPart == highlightedPart)
-					{
-						ApplyTargetHighlight();
-					}
-					else
-					{
-						hoverPart.SetHighlightDefault();
-					}
+					RestoreOrClearHighlight(hoverGroup[i]);
 				}
+				hoverGroup.Clear();
 				hoverPart = hovered;
 				if (hoverPart != null)
 				{
-					hoverPart.SetHighlightType(Part.HighlightType.AlwaysOn);
-					hoverPart.SetHighlightColor(Color.cyan);
-					hoverPart.SetHighlight(true, false);
+					// Preview the whole symmetry group, not just the part under the
+					// cursor (in-game request, 2026-08-20 — same behavior as KRILL).
+					hoverGroup.Add(hoverPart);
+					hoverGroup.AddRange(SymmetryGroupOf(hoverPart));
+					for (int i = 0; i < hoverGroup.Count; i++)
+					{
+						hoverGroup[i].SetHighlightType(Part.HighlightType.AlwaysOn);
+						hoverGroup[i].SetHighlightColor(Color.cyan);
+						hoverGroup[i].SetHighlight(true, false);
+					}
 				}
 			}
 			if (Input.GetMouseButtonDown(0) && hoverPart != null
 				&& (EventSystem.current == null || !EventSystem.current.IsPointerOverGameObject()))
 			{
 				pendingPickPart = hoverPart;
-				hoverPart.SetHighlightDefault();
+				for (int i = 0; i < hoverGroup.Count; i++)
+				{
+					RestoreOrClearHighlight(hoverGroup[i]);
+				}
+				hoverGroup.Clear();
 				hoverPart = null;
 				// Lock stays active — released only once mouse-up confirms the pick.
 			}
@@ -1792,23 +2087,25 @@ namespace KRAB.UI
 			RectTransform list = KrabUi.ScrollList(panel, 300f);
 
 			BuildVocabularyFamily(list, "#LOC_KRAB_fam_player", Channels, "#LOC_KRAB_ch_",
-				name => ApplyNewSource("PlayerAxis", "channel", name));
+				name => ApplyNewSource("PlayerAxis", "channel", name), "#LOC_KRAB_tip_fam_player");
 			BuildVocabularyFamily(list, "#LOC_KRAB_fam_script", Channels, "#LOC_KRAB_ch_",
-				name => ApplyNewSource("ScriptAxis", "channel", name));
+				name => ApplyNewSource("ScriptAxis", "channel", name), "#LOC_KRAB_tip_fam_script");
 			BuildVocabularyFamily(list, "#LOC_KRAB_fam_physical", Metrics, "#LOC_KRAB_met_",
-				name => ApplyNewSource("PhysicalState", "metric", name));
+				name => ApplyNewSource("PhysicalState", "metric", name), "#LOC_KRAB_tip_fam_physical");
 			BuildVocabularyFamily(list, "#LOC_KRAB_fam_actionGroup", ActionGroupNames, "#LOC_KRAB_ag_",
-				name => ApplyNewSource("ActionGroupState", "group", name));
+				name => ApplyNewSource("ActionGroupState", "group", name), "#LOC_KRAB_tip_fam_actionGroup");
 
 			// No fixed vocabulary (depends on the picked part): same "Pick target…" scene
 			// gesture as an output's target, but it starts a NEW source instead of
 			// retargeting an existing node (StartPartFieldPick, not StartPartPick).
-			KrabUi.Label(list, Loc("#LOC_KRAB_fam_partField"), 11, KrabUi.TanDim);
+			Text partFieldHeader = KrabUi.Label(list, Loc("#LOC_KRAB_fam_partField"), 11, KrabUi.TanDim);
+			KrabUi.Tooltip(partFieldHeader.gameObject, "#LOC_KRAB_tip_fam_partField");
 			RectTransform partFieldGrid = KrabUi.Grid(list, 138f, 22f);
 			KrabUi.TextButton(partFieldGrid, Loc("#LOC_KRAB_ui_pickPart"), StartPartFieldPick,
 				KrabUi.Panel2, KrabUi.GreenHi, 11, 0f, 22f);
 
-			KrabUi.Label(list, Loc("#LOC_KRAB_fam_krabInput"), 11, KrabUi.TanDim);
+			Text krabInputHeader = KrabUi.Label(list, Loc("#LOC_KRAB_fam_krabInput"), 11, KrabUi.TanDim);
+			KrabUi.Tooltip(krabInputHeader.gameObject, "#LOC_KRAB_tip_fam_krabInput");
 			RectTransform slotGrid = KrabUi.Grid(list, 138f, 22f);
 			for (int slot = 1; slot <= ModuleKRABController.InputSlotCount; slot++)
 			{
@@ -1818,7 +2115,8 @@ namespace KRAB.UI
 					KrabUi.Panel2, KrabUi.Text, 11, 0f, 22f);
 			}
 
-			KrabUi.Label(list, Loc("#LOC_KRAB_fam_constant"), 11, KrabUi.TanDim);
+			Text constantHeader = KrabUi.Label(list, Loc("#LOC_KRAB_fam_constant"), 11, KrabUi.TanDim);
+			KrabUi.Tooltip(constantHeader.gameObject, "#LOC_KRAB_tip_fam_constant");
 			RectTransform constGrid = KrabUi.Grid(list, 138f, 22f);
 			KrabUi.TextButton(constGrid, NodeDisplay("Constant"),
 				() => ApplyNewSource("Constant", "value", "0"),
@@ -1828,15 +2126,32 @@ namespace KRAB.UI
 			// "+Term/+Group/+Filter" cannot (those only append to a DYNAMIC group; this
 			// works on any port, including a fixed-arity node's own, enabling chains
 			// like Remap→SlewRate or Comparator→Not).
-			KrabUi.Label(list, Loc("#LOC_KRAB_fam_operators"), 11, KrabUi.TanDim);
+			Text operatorsHeader = KrabUi.Label(list, Loc("#LOC_KRAB_fam_operators"), 11, KrabUi.TanDim);
+			KrabUi.Tooltip(operatorsHeader.gameObject, "#LOC_KRAB_tip_fam_operators");
 			RectTransform opGrid = KrabUi.Grid(list, 138f, 22f);
-			KrabUi.TextButton(opGrid, NodeDisplay("WeightedSum"),
+			Button weightedSumButton = KrabUi.TextButton(opGrid, NodeDisplay("WeightedSum"),
 				() => ApplyNewOperator("WeightedSum"), KrabUi.Panel2, KrabUi.Text, 11, 0f, 22f);
+			KrabUi.Tooltip(weightedSumButton.gameObject, "#LOC_KRAB_tip_node_WeightedSum");
 			foreach (string filterSubtype in KrabGraphEdits.InsertableFilters)
 			{
 				string captured = filterSubtype;
-				KrabUi.TextButton(opGrid, NodeDisplay(captured),
+				Button filterButton = KrabUi.TextButton(opGrid, NodeDisplay(captured),
 					() => ApplyNewOperator(captured), KrabUi.Panel2, KrabUi.Text, 11, 0f, 22f);
+				KrabUi.Tooltip(filterButton.gameObject, "#LOC_KRAB_tip_node_" + captured);
+			}
+
+			// Same insertion mechanism as the shaping filters above, split into its own
+			// labeled sub-section: pure math functions, no state/params, unlike Remap
+			// and friends (2026-08-22, at user request).
+			Text trigHeader = KrabUi.Label(list, Loc("#LOC_KRAB_fam_trig"), 11, KrabUi.TanDim);
+			KrabUi.Tooltip(trigHeader.gameObject, "#LOC_KRAB_tip_fam_trig");
+			RectTransform trigGrid = KrabUi.Grid(list, 138f, 22f);
+			foreach (string trigSubtype in KrabGraphEdits.InsertableTrigFunctions)
+			{
+				string captured = trigSubtype;
+				Button trigButton = KrabUi.TextButton(trigGrid, NodeDisplay(captured),
+					() => ApplyNewOperator(captured), KrabUi.Panel2, KrabUi.Text, 11, 0f, 22f);
+				KrabUi.Tooltip(trigButton.gameObject, "#LOC_KRAB_tip_node_" + captured);
 			}
 
 			// Fan-out: feed this port from a node that already exists elsewhere in the
@@ -1844,12 +2159,14 @@ namespace KRAB.UI
 			List<KrabNode> reusable = KrabGraphEdits.ReusableSignals(Graph, pickerTarget, pickerPort);
 			if (reusable.Count > 0)
 			{
-				KrabUi.Label(list, Loc("#LOC_KRAB_fam_reuse"), 11, KrabUi.TanDim);
+				Text reuseHeader = KrabUi.Label(list, Loc("#LOC_KRAB_fam_reuse"), 11, KrabUi.TanDim);
+				KrabUi.Tooltip(reuseHeader.gameObject, "#LOC_KRAB_tip_fam_reuse");
 				foreach (KrabNode candidate in reusable)
 				{
 					KrabNode captured = candidate;
-					KrabUi.TextButton(list, NodeLabel(candidate) + "  [" + candidate.id + "]",
+					Button reuseButton = KrabUi.TextButton(list, NodeLabel(candidate) + IdSuffix(candidate),
 						() => ApplyExistingSource(captured), KrabUi.Panel2, KrabUi.Text, 11, 0f, 22f);
+					KrabUi.Tooltip(reuseButton.gameObject, NodeFullLabel(candidate));
 				}
 			}
 
@@ -1859,10 +2176,10 @@ namespace KRAB.UI
 		}
 
 		/// <summary>
-		/// Picker for KrabGraphEdits.InsertableFilters, opened by "+ Filter" on a
-		/// group. Selecting one adds it as a new term via the generalized AddSubgroup
-		/// (auto-filling whatever ports it needs), same mechanism "+ Group" already
-		/// used for WeightedSum.
+		/// Picker for KrabGraphEdits.InsertableFilters and InsertableTrigFunctions,
+		/// opened by "+ Filter" on a group. Selecting one adds it as a new term via
+		/// the generalized AddSubgroup (auto-filling whatever ports it needs), same
+		/// mechanism "+ Group" already used for WeightedSum.
 		/// </summary>
 		private void BuildFilterPicker()
 		{
@@ -1875,11 +2192,25 @@ namespace KRAB.UI
 			foreach (string subtype in KrabGraphEdits.InsertableFilters)
 			{
 				string captured = subtype;
-				KrabUi.TextButton(list, NodeDisplay(captured), () =>
+				Button filterButton = KrabUi.TextButton(list, NodeDisplay(captured), () =>
 				{
 					ClearPickerState();
 					Mutate(() => KrabGraphEdits.AddSubgroup(Graph, target, captured));
 				}, KrabUi.Panel2, KrabUi.Text, 12, 0f, 24f);
+				KrabUi.Tooltip(filterButton.gameObject, "#LOC_KRAB_tip_node_" + captured);
+			}
+
+			Text trigHeader = KrabUi.Label(list, Loc("#LOC_KRAB_fam_trig"), 10, KrabUi.TanDim);
+			KrabUi.Tooltip(trigHeader.gameObject, "#LOC_KRAB_tip_fam_trig");
+			foreach (string trigSubtype in KrabGraphEdits.InsertableTrigFunctions)
+			{
+				string captured = trigSubtype;
+				Button trigButton = KrabUi.TextButton(list, NodeDisplay(captured), () =>
+				{
+					ClearPickerState();
+					Mutate(() => KrabGraphEdits.AddSubgroup(Graph, target, captured));
+				}, KrabUi.Panel2, KrabUi.Text, 12, 0f, 24f);
+				KrabUi.Tooltip(trigButton.gameObject, "#LOC_KRAB_tip_node_" + captured);
 			}
 
 			Button cancel = KrabUi.TextButton(panel, Loc("#LOC_KRAB_ui_cancel"), CancelPicker,
@@ -1888,9 +2219,13 @@ namespace KRAB.UI
 		}
 
 		private void BuildVocabularyFamily(RectTransform list, string familyKey, string[] entries,
-			string entryKeyPrefix, System.Action<string> onPick)
+			string entryKeyPrefix, System.Action<string> onPick, string tipKey = null)
 		{
-			KrabUi.Label(list, Loc(familyKey), 11, KrabUi.TanDim);
+			Text header = KrabUi.Label(list, Loc(familyKey), 11, KrabUi.TanDim);
+			if (tipKey != null)
+			{
+				KrabUi.Tooltip(header.gameObject, tipKey);
+			}
 			RectTransform grid = KrabUi.Grid(list, 138f, 22f);
 			foreach (string entry in entries)
 			{
@@ -2244,7 +2579,7 @@ namespace KRAB.UI
 			{
 				if (options.Length == 1 && options[0].symbol.Length > 0)
 				{
-					ParamLabel(parent, options[0].symbol);
+					ParamLabel(parent, options[0].symbol, "#LOC_KRAB_tip_paramUnitSymbol");
 				}
 				return;
 			}

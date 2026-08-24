@@ -59,8 +59,8 @@ namespace KRAB.UI
 
 		private static readonly UnitOption[] RotationRates =
 		{
-			new UnitOption("rad/s", 1f),
-			new UnitOption("°/s", Mathf.Rad2Deg)
+			new UnitOption("°/s", 1f),
+			new UnitOption("rad/s", Mathf.Deg2Rad)
 		};
 
 		private static readonly UnitOption[] Density = { new UnitOption("kg/m³", 1f) };

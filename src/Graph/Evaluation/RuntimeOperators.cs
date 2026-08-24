@@ -315,6 +315,76 @@ namespace KRAB.Graph.Evaluation
 		}
 	}
 
+	// Trigonometry: degrees in/out throughout, matching every other angle already in
+	// KRAB (AoA, deployAngle, ...) — never radians. General-purpose primitives, not
+	// tied to any one use case; kept deliberately this small (no dedicated "heading"
+	// or "sideslip" node) because those need vector dot products KRAB's scalar-only
+	// graph doesn't carry — see notes/catalogo-nodi.md.
+
+	public class SinRuntime : RuntimeNode
+	{
+		public override void Evaluate(EvalContext ctx)
+		{
+			Output = Mathf.Sin(In(0) * Mathf.Deg2Rad);
+		}
+	}
+
+	public class CosRuntime : RuntimeNode
+	{
+		public override void Evaluate(EvalContext ctx)
+		{
+			Output = Mathf.Cos(In(0) * Mathf.Deg2Rad);
+		}
+	}
+
+	public class TanRuntime : RuntimeNode
+	{
+		public override void Evaluate(EvalContext ctx)
+		{
+			Output = Mathf.Tan(In(0) * Mathf.Deg2Rad);
+		}
+	}
+
+	/// <summary>Input clamped to [-1, 1]: asin is undefined outside that domain, and a
+	/// value drifting a hair past ±1 from upstream float error would otherwise turn
+	/// into NaN and silently poison everything downstream.</summary>
+	public class AsinRuntime : RuntimeNode
+	{
+		public override void Evaluate(EvalContext ctx)
+		{
+			Output = Mathf.Asin(Mathf.Clamp(In(0), -1f, 1f)) * Mathf.Rad2Deg;
+		}
+	}
+
+	/// <summary>Same domain clamp as Asin, same reason.</summary>
+	public class AcosRuntime : RuntimeNode
+	{
+		public override void Evaluate(EvalContext ctx)
+		{
+			Output = Mathf.Acos(Mathf.Clamp(In(0), -1f, 1f)) * Mathf.Rad2Deg;
+		}
+	}
+
+	public class AtanRuntime : RuntimeNode
+	{
+		public override void Evaluate(EvalContext ctx)
+		{
+			Output = Mathf.Atan(In(0)) * Mathf.Rad2Deg;
+		}
+	}
+
+	/// <summary>Ports: 0 = y, 1 = x, matching Mathf.Atan2(y, x) and every other
+	/// language's atan2 — not KRAB's usual port-order conventions, but changing the
+	/// argument order from what every player already knows from elsewhere would be
+	/// the actually-surprising choice here.</summary>
+	public class Atan2Runtime : RuntimeNode
+	{
+		public override void Evaluate(EvalContext ctx)
+		{
+			Output = Mathf.Atan2(In(0), In(1)) * Mathf.Rad2Deg;
+		}
+	}
+
 	/// <summary>
 	/// Sample-and-hold. Ports: 0 = signal, 1 = gate, 2 = reset (wire a DEFAULT 0
 	/// when unused). mode = track: follows the signal while the gate is high,

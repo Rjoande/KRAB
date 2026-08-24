@@ -133,7 +133,17 @@ namespace KRAB.Graph
 		/// no way at all to add one from the editor (found while writing the fase-2
 		/// test protocol, 2026-07-10 — a real gap, not a design choice).
 		/// </summary>
-		public static readonly string[] InsertableFilters = { "Remap", "Derivative", "Integrator", "SlewRate", "Comparator", "Hold" };
+		public static readonly string[] InsertableFilters =
+			{ "Remap", "Derivative", "Integrator", "SlewRate", "Comparator", "Hold" };
+
+		/// <summary>
+		/// Pure trigonometric functions (Sin/Cos/Tan/Asin/Acos/Atan/Atan2), inserted
+		/// via the same "turn this leaf into an operator" mechanism as InsertableFilters
+		/// but rendered as their own labeled sub-section (no internal state or params,
+		/// unlike the shaping filters above) — split out 2026-08-22 at user request.
+		/// </summary>
+		public static readonly string[] InsertableTrigFunctions =
+			{ "Sin", "Cos", "Tan", "Asin", "Acos", "Atan", "Atan2" };
 
 		/// <summary>
 		/// Add a nested sub-group term of the given subtype (the "visual parentheses"),

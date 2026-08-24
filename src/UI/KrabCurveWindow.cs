@@ -39,6 +39,10 @@ namespace KRAB.UI
 		/// <summary>Id of the node whose curve window is open, for the main tree's highlight.</summary>
 		public static string OpenNodeId => current != null ? current.remapNode.id : null;
 
+		// Last on-screen position, same session-scoped pattern as KrabEditorWindow's
+		// own lastWindowPosition (in-game request, 2026-08-23) — not persisted.
+		private static Vector2? lastWindowPosition;
+
 		private ModuleKRABController module;
 		private KrabEditorWindow owner;
 		private KrabNode remapNode;
@@ -122,8 +126,16 @@ namespace KRAB.UI
 
 		private void OnDestroy()
 		{
+			if (windowRect != null)
+			{
+				lastWindowPosition = windowRect.anchoredPosition;
+			}
 			InputLockManager.RemoveControlLock(InputLockId);
 			GameEvents.onGameSceneLoadRequested.Remove(OnSceneChange);
+			GameEvents.onHideUI.Remove(HandleHideUI);
+			GameEvents.onShowUI.Remove(HandleShowUI);
+			GameEvents.onGamePause.Remove(HandleGamePause);
+			GameEvents.onGameUnpause.Remove(HandleGameUnpause);
 			if (current == this)
 			{
 				current = null;
@@ -137,6 +149,41 @@ namespace KRAB.UI
 		private void OnSceneChange(GameScenes scene)
 		{
 			Close();
+		}
+
+		// Same independent-flags pattern as KrabEditorWindow (in-game report,
+		// 2026-08-15, fixed there — this window shared the same gap, just not yet
+		// reported): F2 and Esc can each be toggled on their own.
+		private bool hiddenByUI;
+		private bool hiddenByPause;
+
+		private void HandleHideUI()
+		{
+			hiddenByUI = true;
+			UpdateVisibility();
+		}
+
+		private void HandleShowUI()
+		{
+			hiddenByUI = false;
+			UpdateVisibility();
+		}
+
+		private void HandleGamePause()
+		{
+			hiddenByPause = true;
+			UpdateVisibility();
+		}
+
+		private void HandleGameUnpause()
+		{
+			hiddenByPause = false;
+			UpdateVisibility();
+		}
+
+		private void UpdateVisibility()
+		{
+			gameObject.SetActive(!hiddenByUI && !hiddenByPause);
 		}
 
 		private void Close()
@@ -154,6 +201,10 @@ namespace KRAB.UI
 		private void Build()
 		{
 			GameEvents.onGameSceneLoadRequested.Add(OnSceneChange);
+			GameEvents.onHideUI.Add(HandleHideUI);
+			GameEvents.onShowUI.Add(HandleShowUI);
+			GameEvents.onGamePause.Add(HandleGamePause);
+			GameEvents.onGameUnpause.Add(HandleGameUnpause);
 			LoadCurveFromNode();
 
 			Canvas canvas = gameObject.AddComponent<Canvas>();
@@ -167,7 +218,7 @@ namespace KRAB.UI
 			windowRect = KrabUi.Bordered("CurveWindow", transform, KrabUi.Win, KrabUi.Line);
 			windowRect.anchorMin = windowRect.anchorMax = new Vector2(0.5f, 0.5f);
 			windowRect.pivot = new Vector2(0.5f, 0.5f);
-			windowRect.anchoredPosition = new Vector2(-260f, 40f); // to the left of the main editor
+			windowRect.anchoredPosition = lastWindowPosition ?? new Vector2(-260f, 40f); // to the left of the main editor
 			windowRect.sizeDelta = new Vector2(WindowWidth, 100f);
 			FocusLock focus = windowRect.gameObject.AddComponent<FocusLock>();
 			focus.lockId = InputLockId;
