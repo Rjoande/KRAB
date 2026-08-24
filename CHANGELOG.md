@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.0]
+
+### Added
+
+- **7 trigonometric operators**: Sin, Cos, Tan, Asin, Acos, Atan, Atan2 — degrees in, degrees out (or in, for the inverse functions), consistent with every other angle in KRAB. Shown in their own "TRIGONOMETRY" group in both the source picker's OPERATORS family and the "+ Filter" popup, separate from the shaping filters (Remap, Derivative, ...).
+- **7 new Vessel State metrics for building a helicopter-style FADEC/fly-by-wire**: signed per-axis angular rates (PitchRate/RollRate/YawRate, °/s), current vessel mass (Mass, tons), and attitude relative to the local horizon (Pitch/Bank/Heading, °) — the last three use the same formula as stock's own F12 "Aero Data" debug readout, so they match what the navball shows for the active vessel, but work for any loaded vessel.
+- **Part highlighting now covers full symmetry groups**, not just the clicked part — matching KRILL. Source parts feeding the active output tab (via Part Field) are highlighted too, in a distinct color from the output's own target; when a part is both, target wins by default, with a footer toggle to invert that priority for a quick look at sources instead.
+- **Node ids** (`n4`, etc.) can be shown next to every term via a new footer toggle — makes REUSE A SIGNAL traceable in graphs with more than a couple of fan-outs.
+- **The active output tab is now clearly marked** (accent color + underline), instead of a barely-visible tint.
+- **Tooltips everywhere they were still missing**: the "+ Clamp" button, Hold's track/latch toggle, every entry in the OPERATORS/"+ Filter" pickers, every parameter abbreviation (`inMin`, `thr`, `hys`, `τ`, `/s`, ...) and every picker family header, and the full untruncated label on any term that can get cut off in the tree, the simulator, or REUSE A SIGNAL.
+- **Both the main editor and the curve editor now reopen where you left them**, for the rest of the game session (not saved to file).
+
+### Fixed
+
+- The curve editor window didn't hide with F2/Esc like the main editor already does.
+- Growing the main editor window (more nodes = taller) resized it symmetrically around its center, which could push the titlebar off the top of the screen if the window was already positioned near it. It now grows downward only, keeping the titlebar fixed.
+
 ## [0.3.0]
 
 ### Added
