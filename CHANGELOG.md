@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0]
+
+### Added
+
+- **Two new Vessel State metrics**: ForwardSpeed and LateralSpeed, surface velocity projected onto the vessel's own reference frame (nose-forward / right) rather than the world/horizon frame Pitch/Bank/Heading use — pairs with the trigonometric operators (Atan2) for a sideslip readout.
+- **KRILL Group source** (optional): if [KRILL](https://github.com/Rjoande/KRILL) is installed, its extended action groups (11+) become available as a boolean signal, picked from a dedicated number picker right inside the ACTION GROUP family. Without KRILL, the picker entry simply doesn't appear — nothing else changes. **Requires KRILL v0.2+**.
+
 ## [0.4.0]
 
 ### Added
