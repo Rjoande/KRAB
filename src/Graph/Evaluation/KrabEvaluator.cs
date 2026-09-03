@@ -249,6 +249,7 @@ namespace KRAB.Graph.Evaluation
 				case "ScriptAxis": return new ScriptAxisRuntime();
 				case "PhysicalState": return new PhysicalStateRuntime();
 				case "ActionGroupState": return new ActionGroupStateRuntime();
+				case "KrillGroupState": return new KrillGroupStateRuntime();
 				case "PartField": return new PartFieldRuntime();
 				case "WeightedSum": return new WeightedSumRuntime();
 				case "Product": return new ProductRuntime();

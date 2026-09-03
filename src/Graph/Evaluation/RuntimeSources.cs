@@ -187,7 +187,9 @@ namespace KRAB.Graph.Evaluation
 			Mass,
 			Pitch,
 			Bank,
-			Heading
+			Heading,
+			ForwardSpeed,
+			LateralSpeed
 		}
 
 		private Metric metric;
@@ -277,6 +279,15 @@ namespace KRAB.Graph.Evaluation
 				case Metric.Pitch: return AttitudeAngles(vessel).x;
 				case Metric.Bank: return AttitudeAngles(vessel).z;
 				case Metric.Heading: return AttitudeAngles(vessel).y;
+				// Surface velocity projected onto the vessel's own reference frame (not
+				// earth-relative like Pitch/Bank/Heading above): no horizon quaternion
+				// needed here, just InverseTransformDirection. transform.up = nose
+				// (same convention already confirmed for AttitudeAngles); .right = right.
+				// vessel.srf_velocity is a public Vector3d, computed for every loaded
+				// vessel in the same precalc pass as north/upAxis (Vessel.cs ~7267-7271),
+				// so this works for any loaded vessel, not just the active one.
+				case Metric.ForwardSpeed: return LocalVelocity(vessel).y;
+				case Metric.LateralSpeed: return LocalVelocity(vessel).x;
 				default: return 0f;
 			}
 		}
@@ -289,6 +300,11 @@ namespace KRAB.Graph.Evaluation
 			float pitch = attitude.eulerAngles.x <= 180f ? -attitude.eulerAngles.x : 360f - attitude.eulerAngles.x;
 			float bank = attitude.eulerAngles.z <= 180f ? attitude.eulerAngles.z : attitude.eulerAngles.z - 360f;
 			return new Vector3(pitch, attitude.eulerAngles.y, bank);
+		}
+
+		private static Vector3 LocalVelocity(Vessel vessel)
+		{
+			return vessel.ReferenceTransform.InverseTransformDirection(vessel.srf_velocity);
 		}
 	}
 
@@ -316,6 +332,44 @@ namespace KRAB.Graph.Evaluation
 				return;
 			}
 			Output = ctx.vessel != null && ctx.vessel.ActionGroups[group] ? 1f : 0f;
+		}
+	}
+
+	/// <summary>
+	/// Current 0/1 signal of a KRILL extended action group (11+), via
+	/// KrillGroupBridge (reflection-only, disabled with a warning if KRILL
+	/// isn't installed). KRILL derives this level from the group's kind on
+	/// its own side (Pulse/Toggle/Hold) — KRAB just reads the result, no
+	/// kind-specific handling needed here.
+	/// </summary>
+	public class KrillGroupStateRuntime : RuntimeNode
+	{
+		private int group;
+
+		public override bool OnCompiled()
+		{
+			if (!KrillGroupBridge.Installed)
+			{
+				Debug.LogWarningFormat("[KRAB] node '{0}': KRILL not installed, node disabled", Definition.id);
+				return false;
+			}
+			if (!int.TryParse(Definition.GetString("group", ""), out group) || group < 11)
+			{
+				Debug.LogWarningFormat("[KRAB] node '{0}': invalid KRILL group '{1}', node disabled",
+					Definition.id, Definition.GetParam("group"));
+				return false;
+			}
+			return true;
+		}
+
+		public override void Evaluate(EvalContext ctx)
+		{
+			if (TrySimOverride(ctx))
+			{
+				Output = Output >= BoolThreshold ? 1f : 0f; // keep the boolean contract
+				return;
+			}
+			Output = ctx.vessel != null && KrillGroupBridge.GetGroupSignal(ctx.vessel, group) ? 1f : 0f;
 		}
 	}
 

@@ -102,7 +102,8 @@ namespace KRAB.UI
 			None,
 			Source,      // choosing what feeds pickerTarget:pickerPort
 			TargetField, // choosing the axis/action of pickedPart for output pickerTarget
-			Filter       // choosing a shaping operator (KrabGraphEdits.InsertableFilters) to add to pickerTarget
+			Filter,      // choosing a shaping operator (KrabGraphEdits.InsertableFilters) to add to pickerTarget
+			KrillGroup   // choosing a KRILL extended group (11+) number for pickerTarget:pickerPort
 		}
 
 		private PickerKind pickerKind;
@@ -153,7 +154,7 @@ namespace KRAB.UI
 			"AltitudeASL", "AltitudeRadar", "DynamicPressure", "StaticPressure", "AtmDensity",
 			"GForce", "ExternalTemperature", "AngularVelocityMag",
 			"PitchRate", "RollRate", "YawRate", "Mass",
-			"Pitch", "Bank", "Heading"
+			"Pitch", "Bank", "Heading", "ForwardSpeed", "LateralSpeed"
 		};
 
 		private static readonly string[] ActionGroupNames =
@@ -312,6 +313,8 @@ namespace KRAB.UI
 				case "ActionGroupState":
 					string group = node.GetString("group", "?");
 					return LocOr("#LOC_KRAB_ag_" + group, group);
+				case "KrillGroupState":
+					return node.GetString("group", "?");
 				case "ControllerInput":
 					return Localizer.Format("#LOC_KRAB_ui_slot", node.GetString("slot", "1"));
 				case "Constant":
@@ -626,6 +629,12 @@ namespace KRAB.UI
 			if (pickerKind == PickerKind.Filter)
 			{
 				BuildFilterPicker();
+				BuildFooter();
+				return;
+			}
+			if (pickerKind == PickerKind.KrillGroup)
+			{
+				BuildKrillGroupPicker();
 				BuildFooter();
 				return;
 			}
@@ -1432,9 +1441,9 @@ namespace KRAB.UI
 				case "Constant":
 					NumberField(parent, node, "value", "0");
 					break;
-				// ControllerInput / PlayerAxis / ScriptAxis / ActionGroupState carry no
-				// inline fields anymore: their selection lives in the source picker
-				// (the "Name · Detail ▾" button on the row).
+				// ControllerInput / PlayerAxis / ScriptAxis / ActionGroupState /
+				// KrillGroupState carry no inline fields anymore: their selection
+				// lives in the source picker (the "Name · Detail ▾" button on the row).
 				case "PhysicalState":
 					// Sample rate only affects flight (simulation mode bypasses sampling
 					// entirely — see PhysicalStateRuntime.Evaluate): showing a live field
@@ -1550,7 +1559,7 @@ namespace KRAB.UI
 				KrabUi.Size(label.gameObject, 200f, 20f);
 				KrabUi.Tooltip(label.gameObject, NodeFullLabel(node));
 
-				if (node.Info.name == "ActionGroupState")
+				if (node.Info.name == "ActionGroupState" || node.Info.name == "KrillGroupState")
 				{
 					KrabUi.Spacer(row.transform);
 					Button toggle = null;
@@ -1631,6 +1640,8 @@ namespace KRAB.UI
 						case "pitch":
 						case "bank": min = -180f; max = 180f; return;
 						case "heading": min = 0f; max = 360f; return;
+						case "forwardspeed": min = -100f; max = 500f; return; // m/s, can go negative (reversing)
+						case "lateralspeed": min = -100f; max = 100f; return; // m/s, sideslip/drift
 						default: min = 0f; max = 500f; return; // speeds, m/s
 					}
 				case "PartField":
@@ -1709,6 +1720,19 @@ namespace KRAB.UI
 		{
 			pickerKind = PickerKind.Filter;
 			pickerTarget = group;
+			RebuildContent();
+		}
+
+		/// <summary>
+		/// Opens the KRILL extended-group number picker (11..KrillGroupBridge.
+		/// MaxVisibleGroup) for a brand-new source — pickerTarget:pickerPort are
+		/// already set by OpenSourcePicker, this only swaps which panel shows.
+		/// Not a scene gesture (unlike Part Field): no part to click, just a list
+		/// of numbers, so no InputLockManager involved.
+		/// </summary>
+		private void StartKrillGroupPick()
+		{
+			pickerKind = PickerKind.KrillGroup;
 			RebuildContent();
 		}
 
@@ -2092,8 +2116,21 @@ namespace KRAB.UI
 				name => ApplyNewSource("ScriptAxis", "channel", name), "#LOC_KRAB_tip_fam_script");
 			BuildVocabularyFamily(list, "#LOC_KRAB_fam_physical", Metrics, "#LOC_KRAB_met_",
 				name => ApplyNewSource("PhysicalState", "metric", name), "#LOC_KRAB_tip_fam_physical");
-			BuildVocabularyFamily(list, "#LOC_KRAB_fam_actionGroup", ActionGroupNames, "#LOC_KRAB_ag_",
+			RectTransform actionGroupGrid = BuildVocabularyFamily(list, "#LOC_KRAB_fam_actionGroup",
+				ActionGroupNames, "#LOC_KRAB_ag_",
 				name => ApplyNewSource("ActionGroupState", "group", name), "#LOC_KRAB_tip_fam_actionGroup");
+			// KRILL's extended groups (11+) join the ACTION GROUP family rather than
+			// getting their own header — a single button, inline with the other 16
+			// (right after "Custom10", in-game request 2026-08-31), not a vocabulary
+			// grid of its own (up to 89 groups would bloat this list; the dedicated
+			// number picker it opens is where that space actually lives). Hidden
+			// entirely if KRILL isn't installed.
+			if (KrillGroupBridge.Installed)
+			{
+				Button krillGroupButton = KrabUi.TextButton(actionGroupGrid, Loc("#LOC_KRAB_ui_pickKrillGroup"),
+					StartKrillGroupPick, KrabUi.Panel2, KrabUi.GreenHi, 11, 0f, 22f);
+				KrabUi.Tooltip(krillGroupButton.gameObject, "#LOC_KRAB_tip_krillGroup");
+			}
 
 			// No fixed vocabulary (depends on the picked part): same "Pick target…" scene
 			// gesture as an output's target, but it starts a NEW source instead of
@@ -2218,7 +2255,41 @@ namespace KRAB.UI
 			KrabUi.Size(cancel.gameObject, 90f, 24f);
 		}
 
-		private void BuildVocabularyFamily(RectTransform list, string familyKey, string[] entries,
+		/// <summary>
+		/// Number picker for a KRILL extended group (11..KrillGroupBridge.
+		/// MaxVisibleGroup — mirrors KRILL's own visibility cap live, 2026-08-30).
+		/// Opened by "Pick KRILL group…" in the ACTION GROUP family of the source
+		/// picker. Numbers only for now (no live group-name resolution): that
+		/// needs KrillQuery.GetGroupName plus the ship's part list, more bridge
+		/// surface than an MVP warrants — the group's real name is still visible
+		/// in the KRILL window itself.
+		/// </summary>
+		private void BuildKrillGroupPicker()
+		{
+			RectTransform panel = KrabUi.Bordered("KrillGroupPicker", contentHost, KrabUi.Panel, KrabUi.Line);
+			KrabUi.Vertical(panel.gameObject, 9, 6f);
+			KrabUi.Label(panel, Loc("#LOC_KRAB_ui_pickKrillGroupHeader"), 10, KrabUi.TanDim);
+			RectTransform list = KrabUi.ScrollList(panel, 160f);
+
+			RectTransform grid = KrabUi.Grid(list, 60f, 22f);
+			int cap = KrillGroupBridge.MaxVisibleGroup;
+			for (int g = 11; g <= cap; g++)
+			{
+				string value = g.ToString();
+				KrabUi.TextButton(grid, value, () => ApplyNewSource("KrillGroupState", "group", value),
+					KrabUi.Panel2, KrabUi.Text, 11, 0f, 22f);
+			}
+
+			Button cancel = KrabUi.TextButton(panel, Loc("#LOC_KRAB_ui_cancel"), CancelPicker,
+				KrabUi.Panel2, KrabUi.Muted, 12, 90f, 24f);
+			KrabUi.Size(cancel.gameObject, 90f, 24f);
+		}
+
+		/// <summary>Returns the family's grid so a caller can append extra buttons
+		/// inline with the vocabulary entries (KRILL's group picker button does
+		/// this on the ACTION GROUP family, 2026-08-31) — every other caller just
+		/// ignores the return value.</summary>
+		private RectTransform BuildVocabularyFamily(RectTransform list, string familyKey, string[] entries,
 			string entryKeyPrefix, System.Action<string> onPick, string tipKey = null)
 		{
 			Text header = KrabUi.Label(list, Loc(familyKey), 11, KrabUi.TanDim);
@@ -2233,6 +2304,7 @@ namespace KRAB.UI
 				KrabUi.TextButton(grid, LocOr(entryKeyPrefix + entry, entry), () => onPick(captured),
 					KrabUi.Panel2, KrabUi.Text, 11, 0f, 22f);
 			}
+			return grid;
 		}
 
 		private void ApplyNewSource(string subtype, string paramName, string paramValue)
