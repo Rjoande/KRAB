@@ -374,6 +374,46 @@ namespace KRAB.Graph.Evaluation
 	}
 
 	/// <summary>
+	/// Current value (-1..1) of a KRILL axis, via KrillGroupBridge (reflection-only,
+	/// disabled with a warning if KRILL isn't installed or is older than 0.3.0, the
+	/// version that introduced GetAxisState). Starts at 5, KRILL's own virtual axes:
+	/// 1-4 are just stock's own custom axes, already reachable through PlayerAxis/
+	/// ScriptAxis's existing Custom01..04 channels (in-game feedback, 2026-09-16 — no
+	/// reason for KRAB to offer the same four axes twice under two different names).
+	/// No boolean contract here, unlike KrillGroupState: this is an analog reading,
+	/// not a signal.
+	/// </summary>
+	public class KrillAxisStateRuntime : RuntimeNode
+	{
+		private int axis;
+
+		public override bool OnCompiled()
+		{
+			if (!KrillGroupBridge.AxisInstalled)
+			{
+				Debug.LogWarningFormat("[KRAB] node '{0}': KRILL axes not available, node disabled", Definition.id);
+				return false;
+			}
+			if (!int.TryParse(Definition.GetString("axis", ""), out axis) || axis < 5)
+			{
+				Debug.LogWarningFormat("[KRAB] node '{0}': invalid KRILL axis '{1}', node disabled",
+					Definition.id, Definition.GetParam("axis"));
+				return false;
+			}
+			return true;
+		}
+
+		public override void Evaluate(EvalContext ctx)
+		{
+			if (TrySimOverride(ctx))
+			{
+				return;
+			}
+			Output = ctx.vessel != null ? KrillGroupBridge.GetAxisValue(ctx.vessel, axis) : 0f;
+		}
+	}
+
+	/// <summary>
 	/// Reads a numeric/bool field of a specific part+module, chosen with the same
 	/// "Pick target…" scene gesture AxisOutput uses (KrabEditorWindow). Prefers a
 	/// KRAB_DERIVED_FIELD catalog entry (DerivedFieldsCatalog) over PartModule.Fields

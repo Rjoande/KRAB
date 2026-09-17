@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.1]
+
+### Added
+
+- **KRILL Axis source** (optional): if [KRILL](https://github.com/Rjoande/KRILL) v0.3.0+ is installed, its virtual axes (5 and up) become available as an analog -1..1 signal, picked from a dedicated number picker right inside the PLAYER AXES family, after the stock custom axes. Axes 1-4 aren't offered here — they're just stock's own custom axes, already available as Custom01..04. Without KRILL, or with an older KRILL, the picker entry simply doesn't appear.
+- **New PAW toggle, "Show Input Axes" (off by default)**: hides a KRAB instance's 4 bindable Input slots from its own right-click menu, from the stock Axis Groups assignment screen, and from the KRAB INPUT SLOTS family in its own source picker, for a controller that doesn't use them — which is the common case, hence off by default. Purely cosmetic and per-instance — a slot already bound to an axis group, or already wired into the graph, keeps working even hidden; switch it on for any instance that needs a slot.
+
+### Fixed
+
+- Picking a part in flight (Part Field's or Axis Output's target picker) could pop the stock crew/EVA hatch popup open on top of the picker if you clicked a capsule's hatch.
+
 ## [0.5.0]
 
 ### Added
@@ -11,10 +22,10 @@
 
 ### Added
 
-- **7 trigonometric operators**: Sin, Cos, Tan, Asin, Acos, Atan, Atan2 — degrees in, degrees out (or in, for the inverse functions), consistent with every other angle in KRAB. Shown in their own "TRIGONOMETRY" group in both the source picker's OPERATORS family and the "+ Filter" popup, separate from the shaping filters (Remap, Derivative, ...).
-- **7 new Vessel State metrics for building a helicopter-style FADEC/fly-by-wire**: signed per-axis angular rates (PitchRate/RollRate/YawRate, °/s), current vessel mass (Mass, tons), and attitude relative to the local horizon (Pitch/Bank/Heading, °) — the last three use the same formula as stock's own F12 "Aero Data" debug readout, so they match what the navball shows for the active vessel, but work for any loaded vessel.
-- **Part highlighting now covers full symmetry groups**, not just the clicked part — matching KRILL. Source parts feeding the active output tab (via Part Field) are highlighted too, in a distinct color from the output's own target; when a part is both, target wins by default, with a footer toggle to invert that priority for a quick look at sources instead.
-- **Node ids** (`n4`, etc.) can be shown next to every term via a new footer toggle — makes REUSE A SIGNAL traceable in graphs with more than a couple of fan-outs.
+- **7 trigonometric operators**: Sin, Cos, Tan, Asin, Acos, Atan, Atan2; degrees in, degrees out (or in, for the inverse functions), consistent with every other angle in KRAB. Shown in their own "TRIGONOMETRY" group in both the source picker's OPERATORS family and the "+ Filter" popup, separate from the shaping filters (Remap, Derivative, ...).
+- **7 new Vessel State metrics for building a helicopter-style FADEC/fly-by-wire**: signed per-axis angular rates (PitchRate/RollRate/YawRate, °/s), current vessel mass (Mass, tons), and attitude relative to the local horizon (Pitch/Bank/Heading, °). The last three use the same formula as stock's own F12 "Aero Data" debug readout, so they match what the navball shows for the active vessel, but work for any loaded vessel.
+- **Part highlighting now covers full symmetry groups**, not just the clicked part, matching [KRILL](https://github.com/Rjoande/KRILL). Source parts feeding the active output tab (via Part Field) are highlighted too, in a distinct color from the output's own target; when a part is both, target wins by default, with a footer toggle to invert that priority for a quick look at sources instead.
+- **Node ids** (`n4`, etc.) can be shown next to every term via a new footer toggle. Makes REUSE A SIGNAL traceable in graphs with more than a couple of fan-outs.
 - **The active output tab is now clearly marked** (accent color + underline), instead of a barely-visible tint.
 - **Tooltips everywhere they were still missing**: the "+ Clamp" button, Hold's track/latch toggle, every entry in the OPERATORS/"+ Filter" pickers, every parameter abbreviation (`inMin`, `thr`, `hys`, `τ`, `/s`, ...) and every picker family header, and the full untruncated label on any term that can get cut off in the tree, the simulator, or REUSE A SIGNAL.
 - **Both the main editor and the curve editor now reopen where you left them**, for the rest of the game session (not saved to file).

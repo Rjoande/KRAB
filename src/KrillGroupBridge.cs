@@ -21,6 +21,11 @@ namespace KRAB
 		private static FieldInfo signalField;            // GroupState.signal (bool)
 		private static Func<int> getMaxVisibleGroup;      // static KrillParams.MaxVisibleGroup
 
+		private static bool axisInstalled;
+		private static MethodInfo getAxisStateMethod; // static KrillQuery.AxisState? GetAxisState(Vessel, int)
+		private static FieldInfo axisValueField;         // AxisState.value (float)
+		private static Func<int> getMaxVisibleAxis;       // static KrillParams.MaxVisibleAxis
+
 		/// <summary>True once resolved and KRILL was found with a compatible shape.</summary>
 		public static bool Installed
 		{
@@ -56,6 +61,72 @@ namespace KRAB
 				{
 					return 99;
 				}
+			}
+		}
+
+		/// <summary>True once resolved and KRILL exposes GetAxisState with a compatible
+		/// shape (KRILL &gt;= 0.3.0). False for an older KRILL that only has groups —
+		/// the axis source simply isn't offered then, everything else here still works.</summary>
+		public static bool AxisInstalled
+		{
+			get
+			{
+				EnsureInit();
+				return axisInstalled;
+			}
+		}
+
+		/// <summary>
+		/// Highest axis number to offer in KRAB's own picker — mirrors KRILL's own
+		/// KrillParams.MaxVisibleAxis (Difficulty Settings page, default 12, range
+		/// 5-40), same live-read pattern as MaxVisibleGroup/MaxVisibleGroup above.
+		/// 40 (KRILL's own ceiling) if unavailable.
+		/// </summary>
+		public static int MaxVisibleAxis
+		{
+			get
+			{
+				EnsureInit();
+				if (!axisInstalled || getMaxVisibleAxis == null)
+				{
+					return 40;
+				}
+				try
+				{
+					return getMaxVisibleAxis();
+				}
+				catch
+				{
+					return 40;
+				}
+			}
+		}
+
+		/// <summary>
+		/// The current value (-1..1) of a KRILL axis (1-4 mirror stock's own custom
+		/// axes; 5+ are KRILL's virtual axes), for (vessel, axis) — auto-resolving the
+		/// vessel's active override set, same semantics KrillQuery.GetAxisState(Vessel,
+		/// int) exposes to any external mod. Reads AxisState.value: already the real
+		/// runtime level regardless of kind (Spring: live level, returns to rest on its
+		/// own; Fixed: the persisted value) — KRAB never needs to know or branch on
+		/// kind, same contract as GetGroupSignal above. 0 if KRILL isn't installed, the
+		/// axis has no data yet, or anything fails.
+		/// </summary>
+		public static float GetAxisValue(Vessel vessel, int axis)
+		{
+			EnsureInit();
+			if (!axisInstalled || vessel == null)
+			{
+				return 0f;
+			}
+			try
+			{
+				object boxedState = getAxisStateMethod.Invoke(null, new object[] { vessel, axis });
+				return boxedState != null ? (float)axisValueField.GetValue(boxedState) : 0f;
+			}
+			catch
+			{
+				return 0f;
 			}
 		}
 
@@ -143,6 +214,43 @@ namespace KRAB
 					: null;
 
 				installed = true;
+
+				// Separate try: an older KRILL (< 0.3.0, groups only, no GetAxisState
+				// yet) must not disable anything resolved above — axisInstalled just
+				// stays false and the axis source is quietly not offered.
+				try
+				{
+					getAxisStateMethod = queryType.GetMethod("GetAxisState",
+						BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(Vessel), typeof(int) }, null);
+					if (getAxisStateMethod == null)
+					{
+						return;
+					}
+					Type axisStateType = Nullable.GetUnderlyingType(getAxisStateMethod.ReturnType);
+					if (axisStateType == null)
+					{
+						return;
+					}
+					axisValueField = axisStateType.GetField("value", BindingFlags.Public | BindingFlags.Instance);
+					if (axisValueField == null)
+					{
+						return;
+					}
+
+					PropertyInfo maxVisibleAxisProp = paramsType.GetProperty("MaxVisibleAxis",
+						BindingFlags.Public | BindingFlags.Static);
+					MethodInfo maxVisibleAxisGetter = maxVisibleAxisProp?.GetGetMethod();
+					getMaxVisibleAxis = maxVisibleAxisGetter != null
+						? (Func<int>)Delegate.CreateDelegate(typeof(Func<int>), maxVisibleAxisGetter)
+						: null;
+
+					axisInstalled = true;
+				}
+				catch (Exception e)
+				{
+					axisInstalled = false;
+					Debug.LogWarningFormat("[KRAB] KrillGroupBridge axis init failed, KRILL axes disabled: {0}", e);
+				}
 			}
 			catch (Exception e)
 			{

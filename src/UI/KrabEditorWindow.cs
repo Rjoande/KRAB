@@ -103,7 +103,8 @@ namespace KRAB.UI
 			Source,      // choosing what feeds pickerTarget:pickerPort
 			TargetField, // choosing the axis/action of pickedPart for output pickerTarget
 			Filter,      // choosing a shaping operator (KrabGraphEdits.InsertableFilters) to add to pickerTarget
-			KrillGroup   // choosing a KRILL extended group (11+) number for pickerTarget:pickerPort
+			KrillGroup,  // choosing a KRILL extended group (11+) number for pickerTarget:pickerPort
+			KrillAxis    // choosing a KRILL axis number for pickerTarget:pickerPort
 		}
 
 		private PickerKind pickerKind;
@@ -315,6 +316,8 @@ namespace KRAB.UI
 					return LocOr("#LOC_KRAB_ag_" + group, group);
 				case "KrillGroupState":
 					return node.GetString("group", "?");
+				case "KrillAxisState":
+					return node.GetString("axis", "?");
 				case "ControllerInput":
 					return Localizer.Format("#LOC_KRAB_ui_slot", node.GetString("slot", "1"));
 				case "Constant":
@@ -635,6 +638,12 @@ namespace KRAB.UI
 			if (pickerKind == PickerKind.KrillGroup)
 			{
 				BuildKrillGroupPicker();
+				BuildFooter();
+				return;
+			}
+			if (pickerKind == PickerKind.KrillAxis)
+			{
+				BuildKrillAxisPicker();
 				BuildFooter();
 				return;
 			}
@@ -1442,8 +1451,8 @@ namespace KRAB.UI
 					NumberField(parent, node, "value", "0");
 					break;
 				// ControllerInput / PlayerAxis / ScriptAxis / ActionGroupState /
-				// KrillGroupState carry no inline fields anymore: their selection
-				// lives in the source picker (the "Name · Detail ▾" button on the row).
+				// KrillGroupState / KrillAxisState carry no inline fields anymore: their
+				// selection lives in the source picker (the "Name · Detail ▾" button).
 				case "PhysicalState":
 					// Sample rate only affects flight (simulation mode bypasses sampling
 					// entirely — see PhysicalStateRuntime.Evaluate): showing a live field
@@ -1736,6 +1745,17 @@ namespace KRAB.UI
 			RebuildContent();
 		}
 
+		/// <summary>
+		/// Opens the KRILL axis number picker (1..KrillGroupBridge.MaxVisibleAxis) for
+		/// a brand-new source — same non-scene, no-InputLockManager shape as
+		/// StartKrillGroupPick above.
+		/// </summary>
+		private void StartKrillAxisPick()
+		{
+			pickerKind = PickerKind.KrillAxis;
+			RebuildContent();
+		}
+
 		private void StartPartPick(KrabNode output)
 		{
 			pickerTarget = output;
@@ -1744,6 +1764,7 @@ namespace KRAB.UI
 			pickingPart = true;
 			// Scene clicks must reach us, not grab editor parts / open PAWs.
 			InputLockManager.SetControlLock(ControlTypes.ALLBUTCAMERAS, PickLockId);
+			SetCrewHatchInterface(false);
 			RebuildContent();
 		}
 
@@ -1759,7 +1780,47 @@ namespace KRAB.UI
 			pickedPart = null;
 			pickingPart = true;
 			InputLockManager.SetControlLock(ControlTypes.ALLBUTCAMERAS, PickLockId);
+			SetCrewHatchInterface(false);
 			RebuildContent();
+		}
+
+		/// <summary>
+		/// Suppresses the stock crew-hatch/EVA popup while a scene part-pick is active
+		/// (in flight only — CrewHatchController is a flight-only stock behaviour).
+		/// Reported from a KRILL test session, same picker gesture ported from KRAB:
+		/// CrewHatchController.LateUpdate never consults InputLockManager (only
+		/// EventSystem.IsPointerOverGameObject, the cursor lock, and its own
+		/// interfaceEnabled flag), so the picker's ALLBUTCAMERAS lock doesn't stop it —
+		/// clicking a capsule's hatch during a pick opens the crew/EVA popup on top of
+		/// the picker. Fixed in KRILL with the same public API CameraManager itself
+		/// uses for IVA (DisableInterface/EnableInterface); ported here verbatim.
+		/// </summary>
+		private bool hatchInterfaceDisabledByPicker;
+
+		private void SetCrewHatchInterface(bool enabled)
+		{
+			if (!HighLogic.LoadedSceneIsFlight || CrewHatchController.fetch == null)
+			{
+				return;
+			}
+			if (!enabled)
+			{
+				CrewHatchController.fetch.DisableInterface();
+				hatchInterfaceDisabledByPicker = true;
+				return;
+			}
+			if (!hatchInterfaceDisabledByPicker) // never re-enable what we did not disable
+			{
+				return;
+			}
+			hatchInterfaceDisabledByPicker = false;
+			CameraManager cam = CameraManager.Instance;
+			bool inIva = cam != null && (cam.currentCameraMode == CameraManager.CameraMode.IVA
+				|| cam.currentCameraMode == CameraManager.CameraMode.Internal);
+			if (!inIva) // stock keeps it off on its own while in IVA
+			{
+				CrewHatchController.fetch.EnableInterface();
+			}
 		}
 
 		/// <summary>The active output tab's bound part, if any and if still resolvable
@@ -1990,6 +2051,7 @@ namespace KRAB.UI
 			hoverGroup.Clear();
 			hoverPart = null;
 			InputLockManager.RemoveControlLock(PickLockId);
+			SetCrewHatchInterface(true);
 		}
 
 		private void CancelPicker()
@@ -2044,6 +2106,7 @@ namespace KRAB.UI
 					pendingPickPart = null;
 					pickingPart = false;
 					InputLockManager.RemoveControlLock(PickLockId);
+					SetCrewHatchInterface(true);
 					pickerKind = PickerKind.TargetField;
 					RebuildContent();
 				}
@@ -2110,8 +2173,21 @@ namespace KRAB.UI
 			KrabUi.Label(panel, Loc("#LOC_KRAB_ui_pickSource"), 10, KrabUi.TanDim);
 			RectTransform list = KrabUi.ScrollList(panel, 300f);
 
-			BuildVocabularyFamily(list, "#LOC_KRAB_fam_player", Channels, "#LOC_KRAB_ch_",
+			RectTransform playerGrid = BuildVocabularyFamily(list, "#LOC_KRAB_fam_player", Channels, "#LOC_KRAB_ch_",
 				name => ApplyNewSource("PlayerAxis", "channel", name), "#LOC_KRAB_tip_fam_player");
+			// KRILL's virtual axes (5+ — 1-4 are just stock's own custom axes, already
+			// reachable above as Custom01..04) join the PLAYER AXES family rather than
+			// getting their own header — one inline button right after "Custom Axis 04"
+			// (in-game request, 2026-09-16), same "no room for a whole new family for
+			// one button" reasoning already used for the KRILL Group button below.
+			// Hidden entirely if the installed KRILL doesn't expose GetAxisState yet
+			// (< 0.3.0).
+			if (KrillGroupBridge.AxisInstalled)
+			{
+				Button krillAxisButton = KrabUi.TextButton(playerGrid, Loc("#LOC_KRAB_ui_pickKrillAxis"),
+					StartKrillAxisPick, KrabUi.Panel2, KrabUi.GreenHi, 11, 0f, 22f);
+				KrabUi.Tooltip(krillAxisButton.gameObject, "#LOC_KRAB_tip_krillAxis");
+			}
 			BuildVocabularyFamily(list, "#LOC_KRAB_fam_script", Channels, "#LOC_KRAB_ch_",
 				name => ApplyNewSource("ScriptAxis", "channel", name), "#LOC_KRAB_tip_fam_script");
 			BuildVocabularyFamily(list, "#LOC_KRAB_fam_physical", Metrics, "#LOC_KRAB_met_",
@@ -2141,15 +2217,22 @@ namespace KRAB.UI
 			KrabUi.TextButton(partFieldGrid, Loc("#LOC_KRAB_ui_pickPart"), StartPartFieldPick,
 				KrabUi.Panel2, KrabUi.GreenHi, 11, 0f, 22f);
 
-			Text krabInputHeader = KrabUi.Label(list, Loc("#LOC_KRAB_fam_krabInput"), 11, KrabUi.TanDim);
-			KrabUi.Tooltip(krabInputHeader.gameObject, "#LOC_KRAB_tip_fam_krabInput");
-			RectTransform slotGrid = KrabUi.Grid(list, 138f, 22f);
-			for (int slot = 1; slot <= ModuleKRABController.InputSlotCount; slot++)
+			// Hidden entirely when this controller's own "Show KRAB Input axes" PAW
+			// toggle is off (in-game request, 2026-09-17) — same declutter intent as
+			// the PAW/Axis Groups hiding it also does, extended to this picker so a
+			// controller that never uses the slots doesn't show them here either.
+			if (module.showInputAxes)
 			{
-				string value = slot.ToString();
-				KrabUi.TextButton(slotGrid, Localizer.Format("#LOC_KRAB_ui_slot", value),
-					() => ApplyNewSource("ControllerInput", "slot", value),
-					KrabUi.Panel2, KrabUi.Text, 11, 0f, 22f);
+				Text krabInputHeader = KrabUi.Label(list, Loc("#LOC_KRAB_fam_krabInput"), 11, KrabUi.TanDim);
+				KrabUi.Tooltip(krabInputHeader.gameObject, "#LOC_KRAB_tip_fam_krabInput");
+				RectTransform slotGrid = KrabUi.Grid(list, 138f, 22f);
+				for (int slot = 1; slot <= ModuleKRABController.InputSlotCount; slot++)
+				{
+					string value = slot.ToString();
+					KrabUi.TextButton(slotGrid, Localizer.Format("#LOC_KRAB_ui_slot", value),
+						() => ApplyNewSource("ControllerInput", "slot", value),
+						KrabUi.Panel2, KrabUi.Text, 11, 0f, 22f);
+				}
 			}
 
 			Text constantHeader = KrabUi.Label(list, Loc("#LOC_KRAB_fam_constant"), 11, KrabUi.TanDim);
@@ -2277,6 +2360,35 @@ namespace KRAB.UI
 			{
 				string value = g.ToString();
 				KrabUi.TextButton(grid, value, () => ApplyNewSource("KrillGroupState", "group", value),
+					KrabUi.Panel2, KrabUi.Text, 11, 0f, 22f);
+			}
+
+			Button cancel = KrabUi.TextButton(panel, Loc("#LOC_KRAB_ui_cancel"), CancelPicker,
+				KrabUi.Panel2, KrabUi.Muted, 12, 90f, 24f);
+			KrabUi.Size(cancel.gameObject, 90f, 24f);
+		}
+
+		/// <summary>
+		/// Number picker for a KRILL axis (5..KrillGroupBridge.MaxVisibleAxis — mirrors
+		/// KRILL's own visibility cap live). Opened by "Pick KRILL axis…" in the PLAYER
+		/// AXES family of the source picker. Starts at 5, KRILL's own virtual axes: 1-4
+		/// are just stock's own custom axes, already reachable as Custom01..04 right
+		/// above this button (in-game feedback, 2026-09-16 — no reason to offer the
+		/// same four axes twice under two different names).
+		/// </summary>
+		private void BuildKrillAxisPicker()
+		{
+			RectTransform panel = KrabUi.Bordered("KrillAxisPicker", contentHost, KrabUi.Panel, KrabUi.Line);
+			KrabUi.Vertical(panel.gameObject, 9, 6f);
+			KrabUi.Label(panel, Loc("#LOC_KRAB_ui_pickKrillAxisHeader"), 10, KrabUi.TanDim);
+			RectTransform list = KrabUi.ScrollList(panel, 160f);
+
+			RectTransform grid = KrabUi.Grid(list, 60f, 22f);
+			int cap = KrillGroupBridge.MaxVisibleAxis;
+			for (int a = 5; a <= cap; a++)
+			{
+				string value = a.ToString();
+				KrabUi.TextButton(grid, value, () => ApplyNewSource("KrillAxisState", "axis", value),
 					KrabUi.Panel2, KrabUi.Text, 11, 0f, 22f);
 			}
 

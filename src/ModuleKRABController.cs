@@ -60,6 +60,22 @@ namespace KRAB
 		public float krabInput4;
 
 		/// <summary>
+		/// Per-instance declutter switch (in-game request, 2026-09-17 — a whole
+		/// difficulty-settings page was overkill for one toggle): hides the 4 slots
+		/// above from PAW and from the stock Axis Groups assignment screen, and the
+		/// KRAB INPUT SLOTS family from this controller's own source picker, for a
+		/// KRAB instance that never binds anything to a real axis group. Purely
+		/// cosmetic — a slot already wired into the graph keeps reading fine even
+		/// hidden. Always visible itself, obviously, or there'd be no way back.
+		/// Off by default (2026-09-17, user request): most KRAB instances never
+		/// bind these, so hidden is the common case — a player who wants them
+		/// switches this on once per instance.
+		/// </summary>
+		[KSPField(isPersistant = true, guiActive = true, guiActiveEditor = true, guiName = "#LOC_KRAB_showInputAxes")]
+		[UI_Toggle(disabledText = "#autoLOC_8005004", enabledText = "#autoLOC_8005003", scene = UI_Scene.All, affectSymCounterparts = UI_Scene.None)]
+		public bool showInputAxes = false;
+
+		/// <summary>
 		/// Raw KRAB_GRAPH ConfigNode, kept as a fallback in case parsing throws:
 		/// whatever happens, the player's graph must survive a load+save cycle.
 		/// </summary>
@@ -102,6 +118,38 @@ namespace KRAB
 		private string consumptionString;
 
 		public int Priority => (int)priorityField;
+
+		private static readonly string[] InputSlotFieldNames =
+			{ "krabInput1", "krabInput2", "krabInput3", "krabInput4" };
+
+		/// <summary>
+		/// Applies showInputAxes to the 4 slots: guiActive/guiActiveEditor for PAW,
+		/// BaseAxisField.active for the stock Axis Groups assignment screen (same
+		/// flag ModuleAeroSurface/ModuleLight use to keep their own non-assignable
+		/// fields out of that list — confirmed on the decompiled BaseAxisField.
+		/// CreateAxisList). Called once from OnStart and again on every live PAW
+		/// toggle (see the onFieldChanged hooks there) — both target UIs rebuild
+		/// themselves fresh every time they're opened, so there's nothing to do
+		/// beyond keeping these flags current.
+		/// </summary>
+		private void ApplyInputAxisVisibility()
+		{
+			for (int i = 0; i < InputSlotFieldNames.Length; i++)
+			{
+				BaseField field = Fields[InputSlotFieldNames[i]];
+				field.guiActive = showInputAxes;
+				field.guiActiveEditor = showInputAxes;
+				if (field is BaseAxisField axisField)
+				{
+					axisField.active = showInputAxes;
+				}
+			}
+		}
+
+		private void OnShowInputAxesChanged(BaseField field, object oldValue)
+		{
+			ApplyInputAxisVisibility();
+		}
 
 		public float GetControllerInput(int slot)
 		{
@@ -222,6 +270,12 @@ namespace KRAB
 			Events["RunGraphSelfTest"].active = debugMode;
 			Events["DebugBindFirstServo"].active = debugMode;
 			Events["DebugBindFirstLight"].active = debugMode;
+
+			ApplyInputAxisVisibility();
+			// Live PAW toggle, not a one-shot settings read: re-apply immediately on
+			// every click instead of waiting for the next OnStart, in both scenes.
+			((UI_Toggle)Fields[nameof(showInputAxes)].uiControlEditor).onFieldChanged += OnShowInputAxesChanged;
+			((UI_Toggle)Fields[nameof(showInputAxes)].uiControlFlight).onFieldChanged += OnShowInputAxesChanged;
 
 			if (HighLogic.LoadedSceneIsFlight || HighLogic.LoadedSceneIsEditor)
 			{

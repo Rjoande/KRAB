@@ -52,6 +52,7 @@ namespace KRAB.Graph
 			Register(new SubtypeInfo("PhysicalState", NodeKind.Source, 0));
 			Register(new SubtypeInfo("ActionGroupState", NodeKind.Source, 0));
 			Register(new SubtypeInfo("KrillGroupState", NodeKind.Source, 0));
+			Register(new SubtypeInfo("KrillAxisState", NodeKind.Source, 0));
 			Register(new SubtypeInfo("PartField", NodeKind.Source, 0));
 			// Operators
 			Register(new SubtypeInfo("WeightedSum", NodeKind.Operator, -1, 1));

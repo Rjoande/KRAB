@@ -9,6 +9,10 @@ src/.vs/
 # Claude Code project hub — not part of the shipped mod, kept local only.
 notes/
 CLAUDE.md
+KRAB-9000_design_doc.md
+
+# Release packages
+KRAB*.zip
 
 # Inert dev-test scaffolding (a disabled ModuleManager patch, .txt so KSP
 # never loads it) — useful while developing, not meant for the public release.
