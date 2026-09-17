@@ -4,8 +4,8 @@
 
 ### Added
 
-- **KRILL Axis source** (optional): if [KRILL](https://github.com/Rjoande/KRILL) v0.3.0+ is installed, its virtual axes (5 and up) become available as an analog -1..1 signal, picked from a dedicated number picker right inside the PLAYER AXES family, after the stock custom axes. Axes 1-4 aren't offered here — they're just stock's own custom axes, already available as Custom01..04. Without KRILL, or with an older KRILL, the picker entry simply doesn't appear.
-- **New PAW toggle, "Show Input Axes" (off by default)**: hides a KRAB instance's 4 bindable Input slots from its own right-click menu, from the stock Axis Groups assignment screen, and from the KRAB INPUT SLOTS family in its own source picker, for a controller that doesn't use them — which is the common case, hence off by default. Purely cosmetic and per-instance — a slot already bound to an axis group, or already wired into the graph, keeps working even hidden; switch it on for any instance that needs a slot.
+- **KRILL Axis source** (optional): if [KRILL](https://github.com/Rjoande/KRILL) v0.3.0+ is installed, its virtual axes (5 and up) become available as an analog -1..1 signal.
+- **New PAW toggle, "Show Input Axes" (off by default)**: hides a KRAB instance's 4 bindable Input slots from its own right-click menu, from the stock Axis Groups assignment screen, and from the KRAB INPUT SLOTS family in its own source picker.
 
 ### Fixed
 
