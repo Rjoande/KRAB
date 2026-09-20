@@ -27,6 +27,7 @@ Where the KAL-1000 plays back a hand-authored sequence, the KRAB-9000 *listens* 
 
 - [LoadingTipsPlus](https://github.com/JPLRepo/LoadingTipsPlus) — if it's installed, KRAB adds a handful of its own tips to the loading screen rotation (they're added to the existing pool, never replacing anyone else's). Without it, KRAB's tip file simply sits there unread: nothing else about the mod changes.
 - [MFD Extension](https://github.com/Rjoande/MFD-Extension) — if it and Avionics Systems (MAS) are both installed, KRAB registers a bay on the shared IVA monitor. Preliminary: today it's a hello-world page proving the integration end-to-end, not yet real KRAB telemetry. Without MFD Extension, nothing changes.
+- [KRILL](https://github.com/Rjoande/KRILL) — if it's installed, its extended action groups (11+) and virtual axes (5+) become available as graph sources, picked right inside the ACTION GROUP and PLAYER AXES families. Groups need KRILL v0.2+, axes v0.3.0+. Without KRILL, those picker entries simply don't appear.
 
 ## Installation
 

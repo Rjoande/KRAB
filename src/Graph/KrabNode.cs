@@ -1,9 +1,8 @@
 namespace KRAB.Graph
 {
 	/// <summary>
-	/// A graph node. Typed members cover what this version of the mod understands;
-	/// the full original ConfigNode is retained so unknown values written by newer
-	/// versions survive load+save untouched (round-trip decision).
+	/// A graph node. Typed members cover what this version of the mod understands; the full
+	/// original ConfigNode is retained so unknown values from newer versions survive load+save.
 	/// </summary>
 	public class KrabNode
 	{
@@ -142,10 +141,9 @@ namespace KRAB.Graph
 			return values;
 		}
 
-		// Sub-node accessors (M4): a curve is a nested ConfigNode (FloatCurve's own
-		// `key = t v inTan outTan` format), not a flat value — everything above only
-		// handles values. CreateCopy() in Save()/Load() already deep-copies sub-nodes
-		// automatically, so once written here a curve round-trips for free.
+		// Sub-node accessors: a curve is a nested ConfigNode (FloatCurve's own
+		// `key = t v inTan outTan` format), not a flat value. CreateCopy() in Save()/Load()
+		// already deep-copies sub-nodes, so a curve round-trips for free.
 
 		public ConfigNode GetNode(string name)
 		{

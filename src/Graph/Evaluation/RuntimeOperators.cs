@@ -12,7 +12,7 @@ namespace KRAB.Graph.Evaluation
 
 		public override bool OnCompiled()
 		{
-			// One weight per port; missing entries default to 1 (catalog).
+			// One weight per port; missing entries default to 1.
 			float[] declared = Definition.GetFloats("weights");
 			weights = new float[Inputs.Length];
 			for (int i = 0; i < weights.Length; i++)
@@ -67,13 +67,10 @@ namespace KRAB.Graph.Evaluation
 	}
 
 	/// <summary>
-	/// Linear inMin..inMax → outMin..outMax by default. If a `curve` sub-node is
-	/// present (M4, 2026-07-14), it takes over entirely: the curve's own keyframes
-	/// define both domain (x = raw input) and range (y = output) directly, the same
-	/// way KAL's own timeValue curve maps its axis — inMin/inMax/outMin/outMax are
-	/// then unused (kept in the cfg only as the curve editor's initial seed range,
-	/// see KrabCurveWindow). Reuses KSP's own FloatCurve for the ConfigNode format
-	/// (`key = t v inTan outTan`), identical to KAL's — no new format to invent.
+	/// Linear inMin..inMax → outMin..outMax by default. A `curve` sub-node takes over
+	/// entirely: its keyframes define both domain (x = raw input) and range (y = output),
+	/// leaving inMin..outMax only to seed the curve editor. The curve uses KSP's own
+	/// FloatCurve ConfigNode format (`key = t v inTan outTan`).
 	/// </summary>
 	public class RemapRuntime : RuntimeNode
 	{
@@ -123,10 +120,9 @@ namespace KRAB.Graph.Evaluation
 	}
 
 	/// <summary>
-	/// Crossfade between A (port 0) and B (port 1) driven by a control signal
-	/// (port 2). With a blend band the transition is a linear fade across
-	/// [threshold - blendWidth/2, threshold + blendWidth/2]; with blendWidth = 0
-	/// it degenerates to a hysteresis-guarded switch. To calibrate in flight tests.
+	/// Crossfade between A (port 0) and B (port 1) driven by a control signal (port 2).
+	/// With a blend band the transition is a linear fade across [threshold - blendWidth/2,
+	/// threshold + blendWidth/2]; blendWidth = 0 degenerates to a hysteresis-guarded switch.
 	/// </summary>
 	public class GatedBlendRuntime : RuntimeNode
 	{
@@ -165,9 +161,9 @@ namespace KRAB.Graph.Evaluation
 	}
 
 	/// <summary>
-	/// Rate of change of the input. Upstream sampled sources (PhysicalState) hold
-	/// their value between samples, so the derivative is computed over the time
-	/// between value *changes*, not frame time, and held in between (design note).
+	/// Rate of change of the input. Upstream sampled sources (PhysicalState) hold their
+	/// value between samples, so the derivative is computed over the time between value
+	/// changes, not frame time, and held in between.
 	/// </summary>
 	public class DerivativeRuntime : RuntimeNode
 	{
@@ -210,11 +206,8 @@ namespace KRAB.Graph.Evaluation
 
 	/// <summary>
 	/// Slew-rate limiter: the output tracks the input but may change no faster than
-	/// ratePerSecond signal-units per second. Fills the gap no other node covers
-	/// (temporal rate limiting); useful on instantly-responding targets like RCS
-	/// thrust, reaction-wheel authority or thrust percentage, and for the design
-	/// doc's "gradually recover native authority". Single symmetric rate for now;
-	/// asymmetric rise/fall is a trivial future extension. rate <= 0 means no limit.
+	/// ratePerSecond signal-units per second. Useful on instantly-responding targets like
+	/// RCS thrust or reaction-wheel authority. Single symmetric rate; rate <= 0 = no limit.
 	/// </summary>
 	public class SlewRateRuntime : RuntimeNode
 	{
@@ -242,17 +235,10 @@ namespace KRAB.Graph.Evaluation
 	}
 
 	/// <summary>
-	/// Integrator: Output += In(0) * deltaTime. Composable primitive, not a monolithic
-	/// PID — a PI controller is a Weighted Sum of a proportional term and this node's
-	/// output, with the gains living as that sum's weights, not as parameters here
-	/// (design doc §5/§7). clampMin/clampMax (absent = unclamped, same param names and
-	/// "optional" convention as Weighted Sum's own clamp) are anti-windup, not an
-	/// extra: without them a persistent error — pala a fondo corsa, motore spento —
-	/// grows the accumulator without bound. Port 1 = reset, same >= 0.5 convention as
-	/// Hold's latch reset: while held, the accumulator stays at exactly 0 instead of
-	/// integrating (wire a DEFAULT 0 when unused, same as Hold's reset port). State is
-	/// deliberately NOT persisted to ConfigNode — like every other stateful filter, it
-	/// resets to zero on load and the controller reconverges (design doc §5).
+	/// Integrator: Output += In(0) * deltaTime. A PI controller is a Weighted Sum of a
+	/// proportional term and this node, so gains live there. clampMin/clampMax (absent =
+	/// unclamped) are anti-windup; port 1 = reset (>= 0.5 holds the accumulator at 0).
+	/// State is not persisted: it resets to zero on load.
 	/// </summary>
 	public class IntegratorRuntime : RuntimeNode
 	{
@@ -315,11 +301,9 @@ namespace KRAB.Graph.Evaluation
 		}
 	}
 
-	// Trigonometry: degrees in/out throughout, matching every other angle already in
-	// KRAB (AoA, deployAngle, ...) — never radians. General-purpose primitives, not
-	// tied to any one use case; kept deliberately this small (no dedicated "heading"
-	// or "sideslip" node) because those need vector dot products KRAB's scalar-only
-	// graph doesn't carry — see notes/catalogo-nodi.md.
+	// Trigonometry: degrees in and out throughout, never radians, matching every other
+	// angle in KRAB. General-purpose primitives only: a "heading" or "sideslip" node
+	// would need vector dot products, which KRAB's scalar-only graph doesn't carry.
 
 	public class SinRuntime : RuntimeNode
 	{
@@ -346,8 +330,8 @@ namespace KRAB.Graph.Evaluation
 	}
 
 	/// <summary>Input clamped to [-1, 1]: asin is undefined outside that domain, and a
-	/// value drifting a hair past ±1 from upstream float error would otherwise turn
-	/// into NaN and silently poison everything downstream.</summary>
+	/// value drifting past ±1 from upstream float error would turn into NaN and poison
+	/// everything downstream.</summary>
 	public class AsinRuntime : RuntimeNode
 	{
 		public override void Evaluate(EvalContext ctx)
@@ -373,10 +357,9 @@ namespace KRAB.Graph.Evaluation
 		}
 	}
 
-	/// <summary>Ports: 0 = y, 1 = x, matching Mathf.Atan2(y, x) and every other
-	/// language's atan2 — not KRAB's usual port-order conventions, but changing the
-	/// argument order from what every player already knows from elsewhere would be
-	/// the actually-surprising choice here.</summary>
+	/// <summary>Ports: 0 = y, 1 = x, matching Mathf.Atan2(y, x) and atan2 everywhere else.
+	/// Not KRAB's usual port order, but the familiar argument order is the less surprising
+	/// choice here.</summary>
 	public class Atan2Runtime : RuntimeNode
 	{
 		public override void Evaluate(EvalContext ctx)
@@ -386,10 +369,9 @@ namespace KRAB.Graph.Evaluation
 	}
 
 	/// <summary>
-	/// Sample-and-hold. Ports: 0 = signal, 1 = gate, 2 = reset (wire a DEFAULT 0
-	/// when unused). mode = track: follows the signal while the gate is high,
-	/// freezes while low. mode = latch: captures the signal on the gate's rising
-	/// edge and holds it until reset goes high.
+	/// Sample-and-hold. Ports: 0 = signal, 1 = gate, 2 = reset (wire a DEFAULT 0 when
+	/// unused). mode = track follows the signal while the gate is high and freezes while
+	/// low; mode = latch captures on the gate's rising edge and holds until reset is high.
 	/// </summary>
 	public class HoldRuntime : RuntimeNode
 	{

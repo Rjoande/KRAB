@@ -4,13 +4,9 @@ using System.Text;
 namespace KRAB.Graph
 {
 	/// <summary>
-	/// The KRAB node graph: typed view over a KRAB_GRAPH ConfigNode with full
-	/// round-trip preservation (every element keeps its original ConfigNode and
-	/// only updates the values it understands on save).
-	///
-	/// Validation rules (design doc): acyclic, every input port of a known node
-	/// covered by exactly one link or an explicit DEFAULT, at least one active
-	/// output. Unknown subtypes are kept but disabled — never dropped.
+	/// Typed view over a KRAB_GRAPH ConfigNode with full round-trip preservation: every
+	/// element keeps its original ConfigNode, unknown subtypes are kept but disabled.
+	/// Valid means acyclic, every input port covered once, at least one active output.
 	/// </summary>
 	public class KrabGraph
 	{

@@ -4,9 +4,8 @@ using System.Text;
 namespace KRAB.Graph
 {
 	/// <summary>
-	/// In-game self-test for the graph data model, reachable from the PAW (advanced
-	/// tweakables). Builds sample graphs in code — no test .cfg files in the mod
-	/// folder — and checks parsing, validation and round-trip preservation.
+	/// In-game self-test for the graph data model, reachable from the PAW. Builds sample
+	/// graphs in code, then checks parsing, validation and round-trip preservation.
 	/// </summary>
 	public static class KrabGraphSelfTest
 	{

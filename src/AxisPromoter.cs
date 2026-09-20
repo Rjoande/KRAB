@@ -6,20 +6,10 @@ using UnityEngine;
 namespace KRAB
 {
 	/// <summary>
-	/// Promotes selected plain [KSPField] float fields to BaseAxisField at runtime so
-	/// they become bindable in the Axis Groups menu — and, as a side effect, valid
-	/// targets for KAL and KRAB controllers (BaseAxisField.CreateAxisList picks them up).
-	///
-	/// Stock parts hardcode which fields are [KSPAxisField]; ModuleManager cannot add
-	/// C# attributes. The stock game itself "promotes" attributed fields in
-	/// AxisGroupsManager.BuildBaseAxisFields (called from PartModule.Awake), replacing
-	/// the BaseField in pm.Fields with a BaseAxisField over the same FieldInfo. This
-	/// postfix does the same for config-selected fields, at the same timing — which
-	/// means the stock AXISGROUPS save/load (AxisGroupsManager.Save/LoadAxisFieldNodes)
-	/// persists the player's bindings with no extra code.
-	///
-	/// Rules come from KRAB_AXIS_PROMOTION { PROMOTE { ... } } config nodes, so other
-	/// mods (or players) can extend the list via ModuleManager.
+	/// Promotes plain [KSPField] floats to BaseAxisField at runtime (rules from
+	/// KRAB_AXIS_PROMOTION), making them bindable in Axis Groups and valid KAL/KRAB
+	/// targets. A postfix on stock's own BuildBaseAxisFields, so it inherits its timing
+	/// and the stock AXISGROUPS save/load of the bindings.
 	/// </summary>
 	[KSPAddon(KSPAddon.Startup.Instantly, true)]
 	public class AxisPromoter : MonoBehaviour

@@ -14,9 +14,8 @@ namespace KRAB.Graph.Evaluation
 
 		/// <summary>
 		/// Simulation mode (editor preview): sources return the values in
-		/// <see cref="simOverrides"/> instead of reading the vessel, outputs
-		/// compute but never write to fields nor fire actions. Same evaluator,
-		/// same operator code — the preview matches reality by construction.
+		/// <see cref="simOverrides"/> instead of reading the vessel, and outputs compute
+		/// but never write to fields nor fire actions. Same evaluator, same operator code.
 		/// </summary>
 		public bool simulate;
 
@@ -34,10 +33,9 @@ namespace KRAB.Graph.Evaluation
 	}
 
 	/// <summary>
-	/// Base class of the runtime graph. Signals are plain floats; physical sources
-	/// emit canonical human units (SI), command axes are nominal -1..+1 (throttle
-	/// 0..1) and the boolean convention is: value >= 0.5 is true, boolean outputs
-	/// are exactly 0 or 1 (see notes/catalogo-nodi.md).
+	/// Base class of the runtime graph. Signals are plain floats: physical sources emit
+	/// canonical SI units, command axes are nominal -1..+1 (throttle 0..1), and a value
+	/// >= 0.5 is true, with boolean outputs always exactly 0 or 1.
 	/// </summary>
 	public abstract class RuntimeNode
 	{

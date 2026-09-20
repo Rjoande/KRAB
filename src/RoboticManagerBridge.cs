@@ -6,12 +6,9 @@ using UnityEngine;
 namespace KRAB
 {
 	/// <summary>
-	/// Bridge to RoboticControllerManager.QueueFieldUpdate, which is internal in
-	/// Assembly-CSharp. Routing writes through the manager gives KRAB the same
-	/// priority arbitration KAL controllers use (highest priority wins, equal
-	/// priorities are averaged), so KRAB and KAL can coexist on the same field.
-	/// The reflection cost is paid once: the method is cached as an open-instance
-	/// delegate.
+	/// Bridge to RoboticControllerManager.QueueFieldUpdate, internal in Assembly-CSharp.
+	/// Routing writes through the manager gives KRAB the same priority arbitration KAL
+	/// uses (highest wins, ties averaged), so both can drive the same field.
 	/// </summary>
 	internal static class RoboticManagerBridge
 	{
@@ -46,9 +43,8 @@ namespace KRAB
 		}
 
 		/// <summary>
-		/// Queue a value for a target axis field at the given controller priority.
-		/// Falls back to a direct SetValue when the manager is unavailable, which is
-		/// what ControlledAxis.UpdateFieldValue does too.
+		/// Queue a value for a target axis field at the given controller priority. Falls
+		/// back to a direct SetValue when the manager is unavailable, as ControlledAxis does.
 		/// </summary>
 		internal static void QueueFieldUpdate(BaseAxisField field, float value, int priority)
 		{

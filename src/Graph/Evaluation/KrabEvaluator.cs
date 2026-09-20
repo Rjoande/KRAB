@@ -4,10 +4,9 @@ using UnityEngine;
 namespace KRAB.Graph.Evaluation
 {
 	/// <summary>
-	/// Compiles a validated KrabGraph into runtime nodes and evaluates them in
-	/// topological order once per frame. Compilation refuses graphs with validation
-	/// errors; nodes with bad parameters are disabled individually (output 0), the
-	/// rest of the graph keeps running.
+	/// Compiles a KrabGraph into runtime nodes and evaluates them in topological order
+	/// once per frame. Nodes with bad parameters are disabled individually (output 0),
+	/// the rest of the graph keeps running.
 	/// </summary>
 	public class KrabEvaluator
 	{
@@ -51,19 +50,10 @@ namespace KRAB.Graph.Evaluation
 		}
 
 		/// <summary>
-		/// Compiles whatever the graph currently is — never refuses outright. Verified
-		/// 2026-07-09 (root cause of an in-game report of live values freezing across
-		/// the *entire* graph, including unrelated outputs, while a single group was
-		/// mid-edit with too few terms): every validation-error case already degrades
-		/// safely on its own — an unconnected/under-filled port reads its
-		/// InputBinding's default `constant` (0f), a dangling link is skipped during
-		/// wiring, and a cycle simply never reaches in-degree 0 in TopologicalOrder so
-		/// its nodes are silently dropped from evaluation. Refusing the *whole* graph
-		/// over one locally-broken group was strictly worse than what the runtime
-		/// already handles gracefully node-by-node (the same policy bad parameters
-		/// already get via OnCompiled() returning false). failReason is still
-		/// populated (joined error messages) for logging even though compilation
-		/// no longer aborts because of it.
+		/// Compiles whatever the graph currently is, never refusing outright: an unfilled
+		/// port reads its InputBinding default, a dangling link is skipped while wiring, and
+		/// nodes in a cycle never reach in-degree 0 so they drop out. failReason still holds
+		/// the joined error messages, for logging.
 		/// </summary>
 		public static KrabEvaluator Compile(KrabGraph graph, out string failReason)
 		{
@@ -146,9 +136,8 @@ namespace KRAB.Graph.Evaluation
 				foreach (KrabPortDefault def in graph.Defaults)
 				{
 					// port >= 0 guard: Validate() flags a negative link.toPort but not a
-					// negative DEFAULT.port; only reachable via a hand-edited ConfigNode
-					// (our own editor UI never emits one), but indexing Inputs[-1] would
-					// throw, so it's cheap insurance while touching this code.
+					// negative DEFAULT.port, only reachable via a hand-edited ConfigNode.
+					// Indexing Inputs[-1] would throw.
 					if (def.nodeId == pair.Key.id && def.port >= 0 && def.port < portCount)
 					{
 						pair.Value.Inputs[def.port].constant = def.value;
@@ -184,7 +173,7 @@ namespace KRAB.Graph.Evaluation
 
 		private static RuntimeNode[] TopologicalOrder(KrabGraph graph, Dictionary<KrabNode, RuntimeNode> runtimeByDefinition)
 		{
-			// Kahn's algorithm; the graph is guaranteed acyclic at this point.
+			// Kahn's algorithm: nodes in a cycle never reach in-degree 0 and drop out.
 			Dictionary<KrabNode, int> inDegree = new Dictionary<KrabNode, int>();
 			Dictionary<KrabNode, List<KrabNode>> outgoing = new Dictionary<KrabNode, List<KrabNode>>();
 			foreach (KrabNode node in graph.Nodes)

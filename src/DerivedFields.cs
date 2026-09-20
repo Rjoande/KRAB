@@ -6,11 +6,9 @@ using UnityEngine;
 namespace KRAB
 {
 	/// <summary>
-	/// One KRAB_DERIVED_FIELD config entry: a Part Field picker candidate read via
-	/// reflection on a PartModule member (field or zero-arg method) instead of
-	/// PartModule.Fields. Exists for values whose stock KSPField readout is stale in
-	/// some scene — e.g. ModuleRoboticServoRotor.currentRPM only refreshes while that
-	/// part's PAW is open (verified on decompiled source, notes/design-governor-eliche.md §8.1).
+	/// One KRAB_DERIVED_FIELD config entry: a Part Field picker candidate read by
+	/// reflection on a PartModule member instead of PartModule.Fields. For values whose
+	/// stock readout is stale, e.g. currentRPM only refreshes while that PAW is open.
 	/// </summary>
 	internal class DerivedFieldRule
 	{
@@ -23,23 +21,16 @@ namespace KRAB
 		public MemberInfo memberInfo;
 		public MemberInfo addMemberInfo;
 
-		/// <summary>Optional zero-arg void method invoked on the module right before
-		/// `member` is read — for values whose backing field is only ever refreshed as
-		/// a side effect of a call the game normally makes from behind a PAW gate (e.g.
-		/// ModuleControlSurface.CalcAngleOfAttack(), which updates angleOfAttack but
-		/// only runs inside `if (partActionWindowOpen)`). Distinct from addMember: this
-		/// is a side-effecting refresh, not a second value to add.</summary>
+		/// <summary>Optional zero-arg void method invoked right before `member` is read,
+		/// for backing fields only refreshed behind a PAW gate (e.g. angleOfAttack, from
+		/// CalcAngleOfAttack). A refresh with side effects, not a value like addMember.</summary>
 		public MethodInfo refreshMethodInfo;
 	}
 
 	/// <summary>
-	/// Loads Config/DerivedFields.cfg (KRAB_DERIVED_FIELD nodes, ModuleManager-patchable —
-	/// same flat, lazy-loaded schema as AxisPromoter's KRAB_AXIS_PROMOTION/PROMOTE) and
-	/// resolves/reads entries for the Part Field source (RuntimeSources.PartFieldRuntime)
-	/// and its picker (KrabEditorWindow). An entry's `replaces` hides the stock KSPField
-	/// it supersedes from the picker — only when the entry itself is present, so parts
-	/// with no entry still show whatever KSPFields they have (design doc §8.1: "per i
-	/// moduli senza entry il picker mostra onestamente ciò che c'è").
+	/// Loads Config/DerivedFields.cfg (KRAB_DERIVED_FIELD nodes, ModuleManager-patchable)
+	/// for the Part Field source and its picker. An entry's `replaces` hides the stock
+	/// KSPField it supersedes, so modules with no entry still show all their KSPFields.
 	/// </summary>
 	internal static class DerivedFieldsCatalog
 	{
@@ -126,9 +117,8 @@ namespace KRAB
 		}
 
 		/// <summary>Walks the type hierarchy explicitly (public and non-public, instance
-		/// members only) so a member declared on a base class — e.g. BaseServo's
-		/// internal transformRateOfMotion — resolves regardless of which concrete
-		/// module type the config entry names.</summary>
+		/// only) so a member declared on a base class, e.g. BaseServo's internal
+		/// transformRateOfMotion, resolves whatever concrete type the entry names.</summary>
 		private static MemberInfo ResolveMember(Type type, string name)
 		{
 			const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic

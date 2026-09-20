@@ -33,9 +33,8 @@ namespace KRAB.Graph
 	}
 
 	/// <summary>
-	/// Registry of known node subtypes (see notes/catalogo-nodi.md). Lookup is
-	/// tolerant: unknown names never throw — the caller keeps the node, disabled,
-	/// so configs from newer mod versions survive a round-trip (design decision).
+	/// Registry of known node subtypes. Lookup is tolerant: unknown names never throw and
+	/// the caller keeps the node, disabled, so configs from newer versions round-trip.
 	/// </summary>
 	public static class KrabSubtypes
 	{

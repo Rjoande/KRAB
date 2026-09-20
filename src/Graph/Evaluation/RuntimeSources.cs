@@ -131,9 +131,9 @@ namespace KRAB.Graph.Evaluation
 	}
 
 	/// <summary>
-	/// Effective command as the vessel receives it: vessel.ctrlState after the
-	/// whole FeedInputFeed chain (SAS/MechJeb/AtmosphereAutopilot included).
-	/// Read-only by design — KRAB must never write into the input pipeline.
+	/// Effective command as the vessel receives it: vessel.ctrlState after the whole
+	/// FeedInputFeed chain (SAS/MechJeb/AtmosphereAutopilot included). Read-only:
+	/// KRAB must never write into the input pipeline.
 	/// </summary>
 	public class ScriptAxisRuntime : RuntimeNode
 	{
@@ -207,7 +207,7 @@ namespace KRAB.Graph.Evaluation
 					Definition.id, Definition.GetParam("metric"));
 				return false;
 			}
-			// Design floor: never sample faster than 10 Hz.
+			// Floor: never sample faster than 10 Hz.
 			sampleRate = Mathf.Max(Definition.GetFloat("sampleRate", 0.1f), 0.1f);
 			useEma = string.Equals(Definition.GetString("filter", "none"), "ema", StringComparison.OrdinalIgnoreCase);
 			emaTau = Mathf.Max(Definition.GetFloat("filterParam", 0.5f), 0f);
@@ -260,32 +260,22 @@ namespace KRAB.Graph.Evaluation
 				case Metric.GForce: return (float)vessel.geeForce;
 				case Metric.ExternalTemperature: return (float)vessel.externalTemperature;
 				case Metric.AngularVelocityMag: return vessel.angularVelocity.magnitude * Mathf.Rad2Deg;
-				// x/y/z = pitch/roll/yaw, confirmed on decompiled source: ModuleReactionWheel
-				// builds its torque vector as (ctrlState.pitch, ctrlState.roll, ctrlState.yaw),
-				// and stock SAS (VesselAutopilot) reads vessel.angularVelocity.x/.y/.z with that
-				// same axis assignment for its own rate damping. Same sign convention as the
-				// PlayerAxis/ScriptAxis Pitch/Roll/Yaw channels already in KRAB, for free.
-				// angularVelocity itself is in rad/s (Unity's native Rigidbody convention);
-				// converted to deg/s here since every other angle in KRAB is in degrees.
+				// x/y/z = pitch/roll/yaw: the same assignment ModuleReactionWheel and stock
+				// SAS use, so the sign convention matches KRAB's own Pitch/Roll/Yaw channels.
+				// angularVelocity is rad/s (Unity Rigidbody), converted to deg/s here.
 				case Metric.PitchRate: return vessel.angularVelocity.x * Mathf.Rad2Deg;
 				case Metric.RollRate: return vessel.angularVelocity.y * Mathf.Rad2Deg;
 				case Metric.YawRate: return vessel.angularVelocity.z * Mathf.Rad2Deg;
 				case Metric.Mass: return (float)vessel.totalMass;
-				// Same formula stock uses for its own Aero GUI debug readout (AeroGUI.cs,
-				// F12 > Aero Data), ported from Vessel.north/upAxis instead of the single
-				// active-vessel-only NavBall (KRAB-9000 CLAUDE.md #73) — works for any
-				// loaded vessel, matches what the player sees on their own navball for the
-				// active one. Pitch/bank wrapped to -180..180 (0 = level); heading 0..360.
+				// Same formula as the stock Aero GUI readout, built from Vessel.north/upAxis
+				// instead of the active-vessel-only NavBall, so it works for any loaded
+				// vessel. Pitch/bank wrapped to -180..180 (0 = level); heading 0..360.
 				case Metric.Pitch: return AttitudeAngles(vessel).x;
 				case Metric.Bank: return AttitudeAngles(vessel).z;
 				case Metric.Heading: return AttitudeAngles(vessel).y;
-				// Surface velocity projected onto the vessel's own reference frame (not
-				// earth-relative like Pitch/Bank/Heading above): no horizon quaternion
-				// needed here, just InverseTransformDirection. transform.up = nose
-				// (same convention already confirmed for AttitudeAngles); .right = right.
-				// vessel.srf_velocity is a public Vector3d, computed for every loaded
-				// vessel in the same precalc pass as north/upAxis (Vessel.cs ~7267-7271),
-				// so this works for any loaded vessel, not just the active one.
+				// Surface velocity projected onto the vessel's own frame, not the local
+				// horizon used by Pitch/Bank/Heading: transform.up = nose, .right = right.
+				// vessel.srf_velocity is computed for every loaded vessel, not just the active one.
 				case Metric.ForwardSpeed: return LocalVelocity(vessel).y;
 				case Metric.LateralSpeed: return LocalVelocity(vessel).x;
 				default: return 0f;
@@ -336,11 +326,9 @@ namespace KRAB.Graph.Evaluation
 	}
 
 	/// <summary>
-	/// Current 0/1 signal of a KRILL extended action group (11+), via
-	/// KrillGroupBridge (reflection-only, disabled with a warning if KRILL
-	/// isn't installed). KRILL derives this level from the group's kind on
-	/// its own side (Pulse/Toggle/Hold) — KRAB just reads the result, no
-	/// kind-specific handling needed here.
+	/// Current 0/1 signal of a KRILL extended action group (11+), via KrillGroupBridge
+	/// (reflection-only, disabled with a warning if KRILL isn't installed). KRILL derives
+	/// the level from the group's kind, so no kind-specific handling is needed here.
 	/// </summary>
 	public class KrillGroupStateRuntime : RuntimeNode
 	{
@@ -374,14 +362,9 @@ namespace KRAB.Graph.Evaluation
 	}
 
 	/// <summary>
-	/// Current value (-1..1) of a KRILL axis, via KrillGroupBridge (reflection-only,
-	/// disabled with a warning if KRILL isn't installed or is older than 0.3.0, the
-	/// version that introduced GetAxisState). Starts at 5, KRILL's own virtual axes:
-	/// 1-4 are just stock's own custom axes, already reachable through PlayerAxis/
-	/// ScriptAxis's existing Custom01..04 channels (in-game feedback, 2026-09-16 — no
-	/// reason for KRAB to offer the same four axes twice under two different names).
-	/// No boolean contract here, unlike KrillGroupState: this is an analog reading,
-	/// not a signal.
+	/// Analog value (-1..1) of a KRILL axis, via KrillGroupBridge (reflection-only,
+	/// disabled if KRILL isn't installed or is older than 0.3.0, which added GetAxisState).
+	/// Starts at 5: axes 1-4 mirror the stock Custom01..04 channels of PlayerAxis/ScriptAxis.
 	/// </summary>
 	public class KrillAxisStateRuntime : RuntimeNode
 	{
@@ -414,13 +397,10 @@ namespace KRAB.Graph.Evaluation
 	}
 
 	/// <summary>
-	/// Reads a numeric/bool field of a specific part+module, chosen with the same
-	/// "Pick target…" scene gesture AxisOutput uses (KrabEditorWindow). Prefers a
-	/// KRAB_DERIVED_FIELD catalog entry (DerivedFieldsCatalog) over PartModule.Fields
-	/// when one applies to the resolved module: some stock readouts only refresh while
-	/// their part's PAW is open (verified on decompiled source,
-	/// notes/design-governor-eliche.md §8.1 — ModuleRoboticServoRotor.currentRPM is the
-	/// motivating case). Re-resolved on vessel change only, same cadence as AxisOutput.
+	/// Reads a numeric/bool field of a part+module, chosen with the same "Pick target…"
+	/// scene gesture AxisOutput uses. Prefers a DerivedFieldsCatalog entry over
+	/// PartModule.Fields, since some stock readouts only refresh while their PAW is open
+	/// (ModuleRoboticServoRotor.currentRPM). Re-resolved on vessel change.
 	/// </summary>
 	public class PartFieldRuntime : RuntimeNode
 	{
@@ -492,8 +472,7 @@ namespace KRAB.Graph.Evaluation
 			{
 				Output = Convert.ToSingle(field.GetValue(field.host));
 			}
-			// Unresolved: Output holds its last value (0 initially) — same "nothing to
-			// write" behavior as an unbound AxisOutput, no special-casing needed.
+			// Unresolved: Output holds its last value (0 initially), like an unbound AxisOutput.
 		}
 	}
 }

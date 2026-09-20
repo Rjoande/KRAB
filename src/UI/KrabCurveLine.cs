@@ -4,12 +4,9 @@ using UnityEngine.UI;
 
 namespace KRAB.UI
 {
-	/// <summary>
-	/// Draws a polyline through a set of local-space points, built as a triangle
-	/// strip in OnPopulateMesh — the standard way to render a line in pure UGUI
-	/// with no external package (no LineRenderer/asset bundle: decision already
-	/// made for the whole editor). Used for the curve preview in KrabCurveWindow.
-	/// </summary>
+	/// <summary>Draws a polyline through local-space points as a triangle strip in
+	/// OnPopulateMesh, the way to render a line in pure UGUI with no external package.
+	/// Used for the curve preview in KrabCurveWindow.</summary>
 	public class KrabCurveLine : MaskableGraphic
 	{
 		private readonly List<Vector2> points = new List<Vector2>();

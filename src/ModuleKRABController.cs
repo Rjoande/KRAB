@@ -10,12 +10,8 @@ namespace KRAB
 {
 	/// <summary>
 	/// KRAB-9000 controller: blends multiple inputs (player axes, autopilot output,
-	/// vessel physics) through a node graph and drives target axis fields the same
-	/// way a KAL-1000 does (via RoboticControllerManager, see RoboticManagerBridge).
-	///
-	/// Current milestone: PartModule skeleton — persistent fields, bindable input
-	/// slots, graph ConfigNode round-trip. Graph evaluation and the node editor UI
-	/// come in later milestones.
+	/// vessel physics) through a node graph and drives target axis fields the way a
+	/// KAL-1000 does, through RoboticControllerManager (see RoboticManagerBridge).
 	/// </summary>
 	public class ModuleKRABController : PartModule
 	{
@@ -37,11 +33,9 @@ namespace KRAB
 		[UI_FloatRange(minValue = 1f, maxValue = 5f, stepIncrement = 1f, affectSymCounterparts = UI_Scene.None)]
 		public float priorityField = 3f;
 
-		// Bindable input slots (ControllerInput sources). Being KSPAxisFields they show
-		// up in the Axis Groups menu like KAL's Play Position, inheriting the 5 action
-		// sets, per-set incremental/absolute mode and per-set inversion for free.
-		// Absolute by default: mixer semantics (stick position = value); the player can
-		// switch to incremental per binding in the Axis Groups UI.
+		// Bindable input slots (ControllerInput sources). As KSPAxisFields they appear in
+		// the Axis Groups menu like KAL's Play Position, inheriting the 5 action sets and
+		// their per-set modes. Absolute by default: mixer semantics, stick position = value.
 
 		[KSPAxisField(isPersistant = true, guiActive = true, guiActiveEditor = true, guiActiveUnfocused = true, unfocusedRange = 5f, minValue = 0f, maxValue = 1f, incrementalSpeed = 1f, axisMode = KSPAxisMode.Absolute, guiFormat = "F2", guiName = "#LOC_KRAB_input1")]
 		[UI_FloatRange(minValue = 0f, maxValue = 1f, stepIncrement = 0.01f, scene = UI_Scene.All, affectSymCounterparts = UI_Scene.None)]
@@ -60,16 +54,9 @@ namespace KRAB
 		public float krabInput4;
 
 		/// <summary>
-		/// Per-instance declutter switch (in-game request, 2026-09-17 — a whole
-		/// difficulty-settings page was overkill for one toggle): hides the 4 slots
-		/// above from PAW and from the stock Axis Groups assignment screen, and the
-		/// KRAB INPUT SLOTS family from this controller's own source picker, for a
-		/// KRAB instance that never binds anything to a real axis group. Purely
-		/// cosmetic — a slot already wired into the graph keeps reading fine even
-		/// hidden. Always visible itself, obviously, or there'd be no way back.
-		/// Off by default (2026-09-17, user request): most KRAB instances never
-		/// bind these, so hidden is the common case — a player who wants them
-		/// switches this on once per instance.
+		/// Per-instance declutter switch: hides the 4 slots above from the PAW and the
+		/// stock Axis Groups screen, and the KRAB INPUT SLOTS family from this
+		/// controller's source picker. A wired slot keeps reading while hidden.
 		/// </summary>
 		[KSPField(isPersistant = true, guiActive = true, guiActiveEditor = true, guiName = "#LOC_KRAB_showInputAxes")]
 		[UI_Toggle(disabledText = "#autoLOC_8005004", enabledText = "#autoLOC_8005003", scene = UI_Scene.All, affectSymCounterparts = UI_Scene.None)]
@@ -82,12 +69,9 @@ namespace KRAB
 		private ConfigNode graphNode;
 
 		/// <summary>
-		/// Unity-serialized backup of the graph. Editor part instances are Unity
-		/// clones of the prefab (and of each other, for symmetry and alt-copy):
-		/// only Unity-serializable fields survive cloning — OnLoad is NOT called on
-		/// the clone. KAL solves this with [Serializable] data classes; KRAB keeps
-		/// the graph's ConfigNode text and reparses it on the clone. Any future
-		/// graph mutation (editor UI) must refresh this backup.
+		/// Unity-serialized backup of the graph: editor part instances are Unity clones
+		/// and OnLoad never runs on a clone, so only serializable fields survive. The
+		/// clone reparses this text. Every graph mutation must refresh it.
 		/// </summary>
 		[SerializeField]
 		private string graphBackup = string.Empty;
@@ -100,10 +84,8 @@ namespace KRAB
 		public string graphStatus = "";
 
 		/// <summary>
-		/// Cfg-only developer switch (set `debugMode = true` in the part's MODULE
-		/// block — never exposed as a PAW control): reveals the debug aids below.
-		/// Superseded by the real editor (M3) for normal play; kept as a quick
-		/// regression check for future sessions (2026-07-09, user request).
+		/// Cfg-only developer switch (`debugMode = true` in the part's MODULE block, never
+		/// a PAW control): reveals the debug aids below, kept as a regression net.
 		/// </summary>
 		[KSPField(isPersistant = false)]
 		public bool debugMode = false;
@@ -123,14 +105,9 @@ namespace KRAB
 			{ "krabInput1", "krabInput2", "krabInput3", "krabInput4" };
 
 		/// <summary>
-		/// Applies showInputAxes to the 4 slots: guiActive/guiActiveEditor for PAW,
-		/// BaseAxisField.active for the stock Axis Groups assignment screen (same
-		/// flag ModuleAeroSurface/ModuleLight use to keep their own non-assignable
-		/// fields out of that list — confirmed on the decompiled BaseAxisField.
-		/// CreateAxisList). Called once from OnStart and again on every live PAW
-		/// toggle (see the onFieldChanged hooks there) — both target UIs rebuild
-		/// themselves fresh every time they're opened, so there's nothing to do
-		/// beyond keeping these flags current.
+		/// Applies showInputAxes to the 4 slots: guiActive/guiActiveEditor for the PAW,
+		/// BaseAxisField.active for the stock Axis Groups screen (the same flag stock
+		/// modules use to hide non-assignable fields). Both UIs rebuild on every open.
 		/// </summary>
 		private void ApplyInputAxisVisibility()
 		{
@@ -263,17 +240,14 @@ namespace KRAB
 			RoboticManagerBridge.Initialize();
 			UpdateGraphStatus();
 
-			// Debug aids stay in the code (quick regression check for future sessions)
-			// but off by default: only a `debugMode = true` in the part's own cfg
-			// reveals them, never a PAW toggle (2026-07-09, user request).
+			// Debug aids: revealed only by `debugMode = true` in the part's cfg.
 			Fields["debugOutputValue"].guiActive = debugMode;
 			Events["RunGraphSelfTest"].active = debugMode;
 			Events["DebugBindFirstServo"].active = debugMode;
 			Events["DebugBindFirstLight"].active = debugMode;
 
 			ApplyInputAxisVisibility();
-			// Live PAW toggle, not a one-shot settings read: re-apply immediately on
-			// every click instead of waiting for the next OnStart, in both scenes.
+			// Re-apply on every click, in both scenes, rather than only at OnStart.
 			((UI_Toggle)Fields[nameof(showInputAxes)].uiControlEditor).onFieldChanged += OnShowInputAxesChanged;
 			((UI_Toggle)Fields[nameof(showInputAxes)].uiControlFlight).onFieldChanged += OnShowInputAxesChanged;
 
@@ -313,10 +287,8 @@ namespace KRAB
 			evaluator = KrabEvaluator.Compile(Graph, out string failReason);
 			if (evaluator == null)
 			{
-				// Defensive only: Compile() no longer refuses on validation errors (a
-				// single broken group used to freeze live values for the whole graph,
-				// including unrelated outputs — fixed 2026-07-09). Kept in case a future
-				// Compile() change reintroduces a genuine fatal path.
+				// Defensive only: Compile() does not refuse over validation errors. Kept
+				// in case a future change reintroduces a genuinely fatal path.
 				Debug.LogWarningFormat("[KRAB] {0}: graph not compiled — {1}", part.partInfo.name, failReason);
 			}
 			else
@@ -430,10 +402,8 @@ namespace KRAB
 		}
 
 		/// <summary>
-		/// Recompile without the full Graph.Save()/ToString() persistence write (M4:
-		/// dragging a curve keyframe calls this every move for live preview — the
-		/// full serialize is comparatively expensive and only needed once the drag
-		/// ends, via RefreshGraphPersistence/NotifyGraphEdited).
+		/// Recompile without the Graph.Save()/ToString() persistence write, for live
+		/// preview while dragging a curve keyframe. The full serialize runs on drag end.
 		/// </summary>
 		public void RecompileOnly()
 		{
@@ -510,9 +480,9 @@ namespace KRAB
 			KRAB.UI.KrabEditorWindow.Toggle(this);
 		}
 
-		// Development aid, gated by debugMode (see field above), superseded by the
-		// real target picker (M3) but kept as a quick end-to-end regression check
-		// (RoboticControllerManager arbitration included) for future sessions.
+		// Development aid, gated by debugMode: binds the first AxisOutput to the first
+		// servo axis field on the vessel, exercising the whole write path including
+		// RoboticControllerManager arbitration.
 		[KSPEvent(guiActive = true, guiName = "#LOC_KRAB_debugBind")]
 		public void DebugBindFirstServo()
 		{
@@ -618,10 +588,8 @@ namespace KRAB
 				5f, ScreenMessageStyle.UPPER_CENTER);
 		}
 
-		// Development aid, gated by debugMode. Tests the KrabGraph/KrabNode data
-		// model (parsing, validation, round-trip) independently of the editor UI —
-		// kept deliberately as a regression net (2026-07-09, user request), not
-		// removed now that the editor exercises the graph directly.
+		// Development aid, gated by debugMode: tests the KrabGraph/KrabNode data model
+		// (parsing, validation, round-trip) independently of the editor UI.
 		[KSPEvent(guiActive = true, guiActiveEditor = true, guiName = "#LOC_KRAB_selfTest")]
 		public void RunGraphSelfTest()
 		{

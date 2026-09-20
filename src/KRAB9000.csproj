@@ -9,9 +9,9 @@
     <Version>0.5.1</Version>
     <DebugType>none</DebugType>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <!-- KSP install the reference assemblies come from. Defaults to the game
-         root three levels up (the repo living in <KSP>/GameData/KRAB); when the
-         repo lives elsewhere, pass it explicitly (2026-09-18):
+    <!-- KSP install the reference assemblies come from. Defaults to the game root
+         three levels up (a repo living in <KSP>/GameData/KRAB); pass it explicitly
+         when the repo lives elsewhere:
              dotnet build -c Release -p:KspRoot="E:\path\to\KSP" -->
     <KspRoot Condition="'$(KspRoot)' == ''">$(MSBuildProjectDirectory)\..\..\..</KspRoot>
   </PropertyGroup>

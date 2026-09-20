@@ -4,12 +4,10 @@ using UnityEngine;
 namespace KRAB.Graph.Evaluation
 {
 	/// <summary>
-	/// Drives a target BaseAxisField exactly the way KAL does: the input signal is
-	/// remapped from [inMin, inMax] onto the target's limits (softLimits when the
-	/// module exposes them) and queued through RoboticControllerManager, so priority
-	/// arbitration with other KAL/KRAB controllers is inherited. An unbound output
-	/// (no persistentId yet) still evaluates: its value is visible in the PAW debug
-	/// field, which is how graphs are exercised before the editor UI exists.
+	/// Drives a target BaseAxisField the way KAL does: the input is remapped from
+	/// [inMin, inMax] onto the target's limits (softLimits when exposed) and queued through
+	/// RoboticControllerManager, inheriting its priority arbitration. An unbound output
+	/// still evaluates, its value visible in the PAW debug field.
 	/// </summary>
 	public class AxisOutputRuntime : RuntimeNode
 	{
@@ -113,9 +111,9 @@ namespace KRAB.Graph.Evaluation
 	}
 
 	/// <summary>
-	/// Fires a KSPAction on the rising/falling/both edge of its boolean input.
-	/// Same firing guards as KAL (active, requireFullControl); minInterval is the
-	/// internal anti-burst protection (persisted, not exposed in UI — decision).
+	/// Fires a KSPAction on the rising/falling/both edge of its boolean input. Same
+	/// firing guards as KAL (active, requireFullControl); minInterval is the anti-burst
+	/// protection, persisted but not exposed in the UI.
 	/// </summary>
 	public class ActionTriggerRuntime : RuntimeNode
 	{

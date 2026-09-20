@@ -6,13 +6,9 @@ using UnityEngine.UI;
 
 namespace KRAB.UI
 {
-	/// <summary>
-	/// Code-built UGUI factory (decision: no asset bundles). Palette: neutral
-	/// KSP-stock blue-grey backdrop (skin "A" from krab-skin-mockup.html) with an
-	/// acid-green accent for interactive/live elements (sliders, telemetry, active
-	/// states) — matching the stock PAW slider color. Chosen 2026-07-06 to replace
-	/// the original all-green KAL-robotics look.
-	/// </summary>
+	/// <summary>Code-built UGUI factory, no asset bundles. Palette: neutral KSP-stock
+	/// blue-grey backdrop with an acid-green accent for interactive and live elements
+	/// (sliders, telemetry, active states), matching the stock PAW slider color.</summary>
 	public static class KrabUi
 	{
 		// Palette
@@ -25,11 +21,8 @@ namespace KRAB.UI
 		public static readonly Color Tan = FromHex("d7ddc4");
 		public static readonly Color TanDim = FromHex("a3ab8f");
 		public static readonly Color Text = FromHex("ccd0d5");
-		// Muted/Faint were too dark for their typical panel backgrounds — measured
-		// ~3.5:1 and ~2.5:1 contrast respectively against Panel2/Panel (WCAG AA wants
-		// 4.5:1 for normal text), read in-game as "grey text on grey background".
-		// Lightened 2026-07-06 to ~5.3:1 / ~4.2:1 while keeping them visibly dimmer
-		// than Text/Tan for the secondary/tertiary hierarchy they're meant to signal.
+		// Muted/Faint sit at ~5.3:1 / ~4.2:1 against Panel2/Panel: dim enough to read
+		// as secondary/tertiary, light enough to stay legible (WCAG AA wants 4.5:1).
 		public static readonly Color Muted = FromHex("aeb3ba");
 		public static readonly Color Faint = FromHex("90959c");
 		public static readonly Color Green = FromHex("9dc23e");
@@ -75,10 +68,8 @@ namespace KRAB.UI
 			return image;
 		}
 
-		/// <summary>
-		/// Panel with a 1px border, mockup style (border-colored back + inset front).
-		/// The fill child ignores layout groups so a layout can live on the panel itself.
-		/// </summary>
+		/// <summary>Panel with a 1px border: border-colored back, inset front fill. The
+		/// fill child ignores layout groups so a layout can live on the panel itself.</summary>
 		public static RectTransform Bordered(string name, Transform parent, Color fill, Color border)
 		{
 			Image back = Panel_(name, parent, border);
@@ -179,7 +170,6 @@ namespace KRAB.UI
 			handleAreaRect.offsetMin = new Vector2(3f, 0f);
 			handleAreaRect.offsetMax = new Vector2(-3f, 0f);
 			Image handle = Panel_("Handle", handleArea.transform, Tan);
-			// Thin thumb (was 10x16 — too bulky per in-game review 2026-07-06)
 			handle.rectTransform.sizeDelta = new Vector2(5f, 12f);
 
 			slider.fillRect = fill.rectTransform;
@@ -245,10 +235,8 @@ namespace KRAB.UI
 			return go;
 		}
 
-		/// <summary>
-		/// Vertical scroll area of fixed height; returns the content transform to
-		/// fill (VerticalLayoutGroup + fitter already attached). Mouse wheel scrolls.
-		/// </summary>
+		/// <summary>Vertical scroll area of fixed height; returns the content transform to
+		/// fill, with VerticalLayoutGroup and fitter already attached. Mouse wheel scrolls.</summary>
 		public static RectTransform ScrollList(Transform parent, float height)
 		{
 			RectTransform outer = Bordered("Scroll", parent, Inset, Line);
@@ -283,14 +271,9 @@ namespace KRAB.UI
 			return content;
 		}
 
-		/// <summary>
-		/// Horizontal scroll strip of fixed height; content grows sideways and is never
-		/// squeezed to fit (a plain HorizontalLayoutGroup would shrink every child once
-		/// their combined preferred width exceeds the row — in-game feedback, 2026-07-17:
-		/// past ~4 output tabs the labels became unreadable). Mouse wheel scrolls
-		/// horizontally via HorizontalWheelScroll — Unity's ScrollRect does not remap a
-		/// vertical wheel delta onto the horizontal axis by itself.
-		/// </summary>
+		/// <summary>Horizontal scroll strip of fixed height; content grows sideways and is
+		/// never squeezed, as a plain HorizontalLayoutGroup would shrink every child. Wheel
+		/// scrolling needs HorizontalWheelScroll: ScrollRect never remaps a vertical delta.</summary>
 		public static RectTransform HScrollList(Transform parent, float height)
 		{
 			RectTransform outer = Bordered("HScroll", parent, Inset, Line);
@@ -353,11 +336,9 @@ namespace KRAB.UI
 			return (RectTransform)go.transform;
 		}
 
-		/// <summary>
-		/// Small single-line text field, inset style. While it has keyboard focus a
-		/// control lock keeps typed characters away from scene shortcuts (the hover
-		/// lock alone leaks if the pointer drifts off the window mid-typing).
-		/// </summary>
+		/// <summary>Small single-line text field, inset style. While it has keyboard focus
+		/// a control lock keeps typed characters away from scene shortcuts; the hover lock
+		/// alone leaks if the pointer drifts off the window mid-typing.</summary>
 		public static InputField Field(Transform parent, string text, float width,
 			UnityAction<string> onEndEdit)
 		{
@@ -382,12 +363,9 @@ namespace KRAB.UI
 			return field;
 		}
 
-		/// <summary>
-		/// Tiny square icon button (✕, +, ↻...). Stick to glyphs from the core
-		/// Arrows block (U+2190-21FF, e.g. ↶ ↷ ↻) or Dingbats (✕) — the dynamic OS
-		/// font built in <see cref="Font"/> does not cover Supplemental Arrows-A
-		/// (e.g. ⟳, U+27F3), which renders as a blank tofu box (in-game feedback).
-		/// </summary>
+		/// <summary>Tiny square icon button. Use glyphs from the core Arrows block
+		/// (U+2190-21FF) or Dingbats: the dynamic OS font of <see cref="Font"/> does not
+		/// cover Supplemental Arrows-A (e.g. ⟳, U+27F3), which renders as a tofu box.</summary>
 		public static Button IconButton(Transform parent, string glyph, UnityAction onClick,
 			Color textColor, float size = 20f)
 		{
@@ -395,8 +373,8 @@ namespace KRAB.UI
 			Button button = image.gameObject.AddComponent<Button>();
 			button.targetGraphic = image;
 			button.onClick.AddListener(onClick);
-			// Glyph scales with the button (fixed 12px read as tiny — in-game feedback):
-			// ~80% of the square, so a 24px undo button gets a 19px arrow.
+			// Glyph scales with the button at ~80% of the square, so a 24px undo button
+			// gets a 19px arrow; a fixed size reads as tiny on the larger buttons.
 			int glyphSize = Mathf.Max(13, Mathf.RoundToInt(size * 0.8f));
 			Text label = Label(image.transform, glyph, glyphSize, textColor, TextAnchor.MiddleCenter);
 			Stretch(label.rectTransform);
@@ -408,12 +386,9 @@ namespace KRAB.UI
 
 		private static readonly Dictionary<string, Sprite> iconSpriteCache = new Dictionary<string, Sprite>();
 
-		/// <summary>
-		/// Loads Textures/icon_&lt;name&gt;.png once and caches the Sprite for the rest of
-		/// the session (GameDatabase indexes any plain PNG under GameData automatically —
-		/// still a code-built UI, not an asset bundle). Caches a null on failure too, so a
-		/// missing file only logs once instead of on every button rebuild.
-		/// </summary>
+		/// <summary>Loads Textures/icon_&lt;name&gt;.png once and caches the Sprite for the
+		/// session; GameDatabase indexes any plain PNG under GameData automatically. Caches
+		/// a null on failure too, so a missing file logs once, not on every button rebuild.</summary>
 		private static Sprite LoadIconSprite(string name)
 		{
 			if (iconSpriteCache.TryGetValue(name, out Sprite cached))
@@ -434,14 +409,9 @@ namespace KRAB.UI
 			return sprite;
 		}
 
-		/// <summary>
-		/// Square icon button using a custom white-silhouette PNG instead of a font
-		/// glyph (see notes/icon-spec.md). Tinted exactly like <see cref="IconButton"/>
-		/// tints its glyph text: Image.color multiplies the sprite's own pixel color, so
-		/// a pure-white source comes out in whatever tint is passed. Falls back to a
-		/// plain flat-colored square (still clickable, just untextured) if the PNG is
-		/// missing, rather than throwing or rendering nothing.
-		/// </summary>
+		/// <summary>Square icon button using a custom white-silhouette PNG instead of a font
+		/// glyph: Image.color multiplies the sprite's own pixels, so a pure-white source
+		/// comes out in the tint passed. Falls back to a flat square if the PNG is missing.</summary>
 		public static Button ImageIconButton(Transform parent, string iconName, UnityAction onClick,
 			Color tint, float size = 20f)
 		{
@@ -492,18 +462,9 @@ namespace KRAB.UI
 		private const float TooltipDelay = 0.5f;
 		private const float TooltipWidth = 220f;
 
-		/// <summary>
-		/// Attaches a hover tooltip to any control that has a Graphic — a Button-based
-		/// one (TextButton/IconButton/ImageIconButton, whose Image is already a raycast
-		/// target) or a specific Label opted into one. Label defaults raycastTarget to
-		/// false everywhere else (perf/simplicity for the many labels that don't need
-		/// one) — this flips it to true only on the Graphic actually passed in, a
-		/// targeted exception rather than a change to that shared default. Shows after
-		/// a short delay so the screen doesn't flood while the mouse crosses several
-		/// controls quickly; anchored just below the control rather than the cursor
-		/// (steadier, no jitter). One tooltip GameObject per hover, created and
-		/// destroyed like everything else in this UI — no persistent state to manage.
-		/// </summary>
+		/// <summary>Attaches a hover tooltip to any control with a Graphic, forcing that one
+		/// Graphic's raycastTarget on (Label leaves it false by default). Shows after a
+		/// delay, anchored below the control, not the cursor; one GameObject per hover.</summary>
 		public static void Tooltip(GameObject target, string locKey)
 		{
 			Graphic graphic = target.GetComponent<Graphic>();
@@ -566,18 +527,15 @@ namespace KRAB.UI
 				RectTransform popupRect = Bordered("Tooltip", canvasRect, Inset, Line);
 				popup = popupRect.gameObject;
 				popupRect.SetAsLastSibling(); // draw above the window's own content
-				// ScreenPointToLocalPointInRectangle returns a point relative to
-				// canvasRect's own PIVOT (typically its center, not its corner) — anchoring
-				// this popup at (0,0) [canvas bottom-left] treated that pivot-relative
-				// point as corner-relative instead, landing it roughly half a screen off
-				// (in-game report, 2026-07-22). Anchoring at the canvas's own pivot puts
-				// both in the same reference frame.
+				// ScreenPointToLocalPointInRectangle returns a point relative to canvasRect's
+				// own pivot (typically its centre, not a corner). Anchoring the popup at that
+				// same pivot keeps point and anchor in one reference frame.
 				popupRect.anchorMin = popupRect.anchorMax = canvasRect.pivot;
 				popupRect.pivot = new Vector2(0f, 1f);
 				popupRect.sizeDelta = new Vector2(TooltipWidth, 10f);
-				// Clamp off the right edge only (v1 scope) — tooltips trigger from
-				// controls mostly in the upper/middle of these windows, bottom-of-screen
-				// overflow is low-probability and not worth the extra flip-logic yet.
+				// Clamped against the right edge only: the controls that carry tooltips sit
+				// in the upper and middle of these windows, so bottom-of-screen overflow is
+				// not worth the extra flip logic.
 				float x = Mathf.Min(localPoint.x, canvasRect.rect.xMax - TooltipWidth);
 				popupRect.anchoredPosition = new Vector2(x, localPoint.y - 6f);
 

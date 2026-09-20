@@ -5,12 +5,9 @@ using UnityEngine;
 namespace KRAB
 {
 	/// <summary>
-	/// Talks to KRILL's KrillQuery/KrillParams purely via reflection, so KRAB
-	/// never needs a hard/compile-time reference to KRILL.dll — same "resolve
-	/// everything by name, never a hard reference" philosophy already used by
-	/// TimeForScience's RealBatteryPowerLedgerWrapper.cs for RealBattery. If
-	/// KRILL isn't installed (or its shape doesn't match), every method below
-	/// returns a safe default instead of throwing.
+	/// Talks to KRILL's KrillQuery/KrillParams purely by reflection, so KRAB never needs
+	/// a compile-time reference to KRILL.dll. With KRILL absent or shaped differently,
+	/// every method here returns a safe default instead of throwing.
 	/// </summary>
 	public static class KrillGroupBridge
 	{
@@ -37,12 +34,9 @@ namespace KRAB
 		}
 
 		/// <summary>
-		/// Highest group number to offer in KRAB's own pickers — mirrors KRILL's
-		/// own visibility cap (its Difficulty Settings page, default 20, range
-		/// 20-99) by reading the live value, so the two UIs never disagree about
-		/// how many groups exist (2026-08-30, user request: "KRAB dovrebbe
-		/// ereditare questa funzione"). 99 (KRILL's own ceiling) if KRILL isn't
-		/// installed, or the value can't be read (e.g. no active save yet).
+		/// Highest group number to offer in KRAB's pickers, read live from KRILL's own
+		/// visibility cap so the two UIs never disagree. 99 (KRILL's ceiling) if KRILL
+		/// isn't installed or the value can't be read yet.
 		/// </summary>
 		public static int MaxVisibleGroup
 		{
@@ -77,10 +71,9 @@ namespace KRAB
 		}
 
 		/// <summary>
-		/// Highest axis number to offer in KRAB's own picker — mirrors KRILL's own
-		/// KrillParams.MaxVisibleAxis (Difficulty Settings page, default 12, range
-		/// 5-40), same live-read pattern as MaxVisibleGroup/MaxVisibleGroup above.
-		/// 40 (KRILL's own ceiling) if unavailable.
+		/// Highest axis number to offer in KRAB's picker, read live from KRILL's own
+		/// MaxVisibleAxis, same pattern as MaxVisibleGroup. 40 (KRILL's ceiling) if
+		/// unavailable.
 		/// </summary>
 		public static int MaxVisibleAxis
 		{
@@ -103,14 +96,9 @@ namespace KRAB
 		}
 
 		/// <summary>
-		/// The current value (-1..1) of a KRILL axis (1-4 mirror stock's own custom
-		/// axes; 5+ are KRILL's virtual axes), for (vessel, axis) — auto-resolving the
-		/// vessel's active override set, same semantics KrillQuery.GetAxisState(Vessel,
-		/// int) exposes to any external mod. Reads AxisState.value: already the real
-		/// runtime level regardless of kind (Spring: live level, returns to rest on its
-		/// own; Fixed: the persisted value) — KRAB never needs to know or branch on
-		/// kind, same contract as GetGroupSignal above. 0 if KRILL isn't installed, the
-		/// axis has no data yet, or anything fails.
+		/// Current value (-1..1) of a KRILL axis for (vessel, axis), resolving the vessel's
+		/// active override set. AxisState.value is already the real runtime level whatever
+		/// the axis kind. 0 if KRILL is absent, the axis has no data, or anything fails.
 		/// </summary>
 		public static float GetAxisValue(Vessel vessel, int axis)
 		{
@@ -131,18 +119,9 @@ namespace KRAB
 		}
 
 		/// <summary>
-		/// The 0/1 level a KRILL extended group is currently presenting, for
-		/// (vessel, group), auto-resolving the vessel's active override set —
-		/// same semantics KrillQuery.GetGroupState(Vessel, int) exposes to any
-		/// external mod. Reads GroupState.signal (2026-08-31 KRILL refactor):
-		/// a plain level already derived from the group's kind on KRILL's side
-		/// — Pulse lit for KrillActivation.PulseSeconds after it fires then off
-		/// on its own, Toggle the persisted bool, Hold lit while held — so KRAB
-		/// never needs to know or branch on kind, unlike before this refactor
-		/// (was reading GroupState.active, private bookkeeping that only made
-		/// sense for Toggle; a Pulse group read as flip-flop noise — the bug a
-		/// KRILL session reported and then fixed at the source). False if
-		/// KRILL isn't installed, the group has no data yet, or anything fails.
+		/// The 0/1 level a KRILL extended group presents for (vessel, group), resolving the
+		/// vessel's active override set. GroupState.signal is already derived from the
+		/// group's kind (Pulse/Toggle/Hold) on KRILL's side. False if anything fails.
 		/// </summary>
 		public static bool GetGroupSignal(Vessel vessel, int group)
 		{

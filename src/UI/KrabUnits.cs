@@ -24,12 +24,9 @@ namespace KRAB.UI
 		}
 	}
 
-	/// <summary>
-	/// Display-unit registry for PhysicalState metrics. Conversion is UI-only by
-	/// design (see notes/catalogo-nodi.md): stored values and graph math always stay
-	/// in the canonical unit; the chosen symbol is persisted per node as the
-	/// `displayUnit` param, which has no effect on evaluation.
-	/// </summary>
+	/// <summary>Display-unit registry for PhysicalState metrics. Conversion is UI-only:
+	/// stored values and graph math always stay in the canonical unit, and the symbol
+	/// persisted per node as the `displayUnit` param has no effect on evaluation.</summary>
 	public static class KrabUnits
 	{
 		private static readonly UnitOption[] Speeds =
@@ -128,12 +125,9 @@ namespace KRAB.UI
 			return ForMetric(metric).Length > 1;
 		}
 
-		/// <summary>
-		/// "20.7 m/s (41.2 kn)" — always shows the canonical (SI) value; appends the
-		/// player's chosen unit in parentheses only when it differs from canonical
-		/// (in-game feedback, 2026-07-09: the simulator should never hide the SI
-		/// reading the rest of the graph actually reasons in).
-		/// </summary>
+		/// <summary>"20.7 m/s (41.2 kn)": always shows the canonical SI value the rest of
+		/// the graph reasons in, and appends the player's chosen unit in parentheses only
+		/// when it differs from canonical.</summary>
 		public static string DualFormat(string metric, string displayUnitSymbol, float canonical, string numberFormat = "F1")
 		{
 			UnitOption canonicalUnit = ForMetric(metric)[0];

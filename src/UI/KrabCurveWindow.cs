@@ -8,23 +8,9 @@ using UnityEngine.UI;
 
 namespace KRAB.UI
 {
-	/// <summary>
-	/// M4 — dedicated modeless curve editor for a Remap node's optional `curve`
-	/// sub-node. Design decided in notes/design-ui-editor.md §9: separate window
-	/// (not widening the main editor), one at a time, the term stays highlighted in
-	/// the main tree while its curve window is open (see OpenNodeId / KrabEditorWindow.
-	/// NodeColor). No manual tangent handles in v1 (auto-smoothed on every edit via
-	/// AnimationCurve.SmoothTangents) — full tangent dragging is most of what makes
-	/// KAL's own CurvePanel 2000+ lines long, and it's prefab-driven besides (not
-	/// reusable under our "no asset bundles" decision); this covers the practical
-	/// "shape a response curve" need without that complexity.
-	///
-	/// Curve semantics: the curve's own keyframes define domain (x = raw input) and
-	/// range (y = output) directly, like KAL's timeValue curve — see RemapRuntime.
-	/// Live drag updates recompile only (RecompileOnly, cheap) for immediate visual
-	/// and behavioral feedback; the full ConfigNode serialize (RefreshGraphPersistence)
-	/// happens once on drag-end, not every frame.
-	/// </summary>
+	/// <summary>Modeless curve editor for a Remap node's optional `curve` sub-node, one
+	/// open at a time. The curve's keyframes define domain (x = raw input) and range
+	/// (y = output) directly, as RemapRuntime reads them; tangents are auto-smoothed.</summary>
 	public class KrabCurveWindow : MonoBehaviour
 	{
 		private const float WindowWidth = 440f;
@@ -39,8 +25,8 @@ namespace KRAB.UI
 		/// <summary>Id of the node whose curve window is open, for the main tree's highlight.</summary>
 		public static string OpenNodeId => current != null ? current.remapNode.id : null;
 
-		// Last on-screen position, same session-scoped pattern as KrabEditorWindow's
-		// own lastWindowPosition (in-game request, 2026-08-23) — not persisted.
+		// Last on-screen position, session-scoped like KrabEditorWindow's own
+		// lastWindowPosition. Not persisted.
 		private static Vector2? lastWindowPosition;
 
 		private ModuleKRABController module;
@@ -83,7 +69,7 @@ namespace KRAB.UI
 			}
 		}
 
-		/// <summary>Called when the owning KrabEditorWindow itself closes — a curve window
+		/// <summary>Called when the owning KrabEditorWindow itself closes: a curve window
 		/// pointing at a node from that editor's graph would otherwise be left floating.</summary>
 		public static void CloseAny()
 		{
@@ -93,14 +79,9 @@ namespace KRAB.UI
 			}
 		}
 
-		/// <summary>Called after Undo/Redo, which replaces the whole KrabGraph with a
-		/// freshly-Loaded one — the curve window's `remapNode` would otherwise point at a
-		/// detached instance whose writes never reach the live graph. Re-points at the
-		/// node sharing the same id (ids are stable across undo/redo) and reloads the
-		/// curve from it, instead of unconditionally closing: closing on every undo
-		/// defeated the point of watching a curve edit get undone live (in-game report,
-		/// 2026-07-15). Only closes if the node genuinely no longer exists (undo went
-		/// past its creation).</summary>
+		/// <summary>Re-points at the node with the same id after Undo/Redo replaces the
+		/// whole KrabGraph, since `remapNode` would otherwise be a detached instance whose
+		/// writes never reach the live graph. Closes only if that node no longer exists.</summary>
 		public static void SyncAfterUndoRedo()
 		{
 			if (current == null)
@@ -110,10 +91,9 @@ namespace KRAB.UI
 			KrabNode resolved = current.module.Graph.FindNode(current.remapNode.id);
 			if (resolved == null || !resolved.HasNode("curve"))
 			{
-				// No node, or a node whose curve itself got undone away (e.g. undo past
-				// "Reset to linear"): nothing left to show. Closing here also avoids
-				// LoadCurveFromNode's own seed-a-linear-curve-and-write-it-back path,
-				// which would otherwise immediately fight the user's own undo.
+				// No node, or a node whose curve was undone away: nothing left to show.
+				// Closing also avoids LoadCurveFromNode's seed-a-linear-curve-and-write-it-
+				// back path, which would immediately fight the undo just performed.
 				current.Close();
 				return;
 			}
@@ -151,9 +131,8 @@ namespace KRAB.UI
 			Close();
 		}
 
-		// Same independent-flags pattern as KrabEditorWindow (in-game report,
-		// 2026-08-15, fixed there — this window shared the same gap, just not yet
-		// reported): F2 and Esc can each be toggled on their own.
+		// Independent flags, same pattern as KrabEditorWindow: F2 and Esc can each be
+		// toggled on their own.
 		private bool hiddenByUI;
 		private bool hiddenByPause;
 
@@ -240,9 +219,6 @@ namespace KRAB.UI
 			Text title = KrabUi.Label(bar, Loc("#LOC_KRAB_ui_curveTitle") + " — " + nodeLabel, 13,
 				KrabUi.Tan, TextAnchor.MiddleLeft, FontStyle.Bold);
 			KrabUi.Size(title.gameObject, -1f, 22f, 1f);
-			// Was already the close control here (the footer's own "Close" button below
-			// was the redundant one). Kept as the plain glyph rather than icon_close
-			// (in-game feedback, 2026-07-20: the custom close icon didn't read well).
 			KrabUi.TextButton(bar, "✕", Close, KrabUi.Panel2, KrabUi.TanDim, 13, 26f, 24f);
 
 			GameObject dragHandleGo = bar.gameObject;
@@ -274,10 +250,9 @@ namespace KRAB.UI
 			GameObject lineGo = KrabUi.Go("Line", graphArea);
 			RectTransform lineRect = (RectTransform)lineGo.transform;
 			KrabUi.Stretch(lineRect, 0f);
-			// Stretch only fixes the anchors/size — a fresh RectTransform's pivot
-			// still defaults to its center, so OnPopulateMesh's local (0,0) would sit
-			// at the box's middle instead of its bottom-left corner (in-game report,
-			// 2026-07-15: the curve rendered shifted up-right, spilling past the box).
+			// Stretch only fixes the anchors and size: a fresh RectTransform's pivot
+			// stays at its centre, which would put OnPopulateMesh's local (0,0) in the
+			// middle of the box instead of its bottom-left corner.
 			lineRect.pivot = Vector2.zero;
 			line = lineGo.AddComponent<KrabCurveLine>();
 			line.color = KrabUi.GreenHi;
@@ -285,10 +260,8 @@ namespace KRAB.UI
 
 			GameObject cursorGo = KrabUi.Go("Cursor", graphArea);
 			cursorMark = (RectTransform)cursorGo.transform;
-			// anchorMin/anchorMax were never set here before (only pivot/sizeDelta) —
-			// left at whatever a fresh RectTransform defaults to, which is NOT the
-			// point-anchor-at-parent-corner this math assumes (in-game report,
-			// 2026-07-15: still offset toward the window's center after the pivot fix).
+			// A fresh RectTransform's anchors are not the point-anchor at the parent's
+			// corner that this positioning math assumes, so set them explicitly.
 			cursorMark.anchorMin = cursorMark.anchorMax = Vector2.zero;
 			cursorMark.anchoredPosition = Vector2.zero;
 			cursorMark.sizeDelta = new Vector2(1.4f, GraphHeight);
@@ -298,9 +271,8 @@ namespace KRAB.UI
 			cursorImg.raycastTarget = false;
 
 			RectTransform pointsHostRect = (RectTransform)KrabUi.Go("Points", graphArea).transform;
-			// anchorMin/anchorMax were never set here either (see the Cursor note
-			// above) — a plain point-anchor needs (0,0) explicitly, it does not come
-			// for free from a fresh RectTransform.
+			// A plain point-anchor needs (0,0) set explicitly here too, for the same
+			// reason as the Cursor above.
 			pointsHostRect.anchorMin = pointsHostRect.anchorMax = Vector2.zero;
 			pointsHostRect.anchoredPosition = Vector2.zero;
 			pointsHostRect.pivot = Vector2.zero;
@@ -326,7 +298,6 @@ namespace KRAB.UI
 			KrabUi.Horizontal(selectedRow.gameObject, 0, 8f);
 			KrabUi.Size(selectedRow.gameObject, -1f, 22f);
 
-			// Close now lives only in the titlebar (in-game request, 2026-07-19).
 			GameObject footer = KrabUi.Go("Footer", body.transform);
 			KrabUi.Horizontal(footer, 0, 8f);
 			KrabUi.TextButton(footer.transform, Loc("#LOC_KRAB_ui_curveReset"), ResetToLinear,
@@ -343,9 +314,9 @@ namespace KRAB.UI
 
 		// -------------------------------------------------------------- curve data
 
-		/// <summary>Loads the existing curve, or seeds a linear 2-point one from the
-		/// current inMin/inMax/outMin/outMax so opening the window never silently
-		/// changes behavior — "Reset to linear" is the explicit way back out.</summary>
+		/// <summary>Loads the existing curve, or seeds a linear 2-point one from the current
+		/// inMin/inMax/outMin/outMax so opening the window never silently changes behavior.
+		/// "Reset to linear" is the explicit way back out.</summary>
 		private void LoadCurveFromNode()
 		{
 			domainMin = remapNode.GetFloat("inMin", 0f);
@@ -384,8 +355,8 @@ namespace KRAB.UI
 			}
 		}
 
-		/// <summary>One undo checkpoint per user gesture (click, drag start, field commit) —
-		/// never per drag frame, or every mouse-move would fragment into its own undo step.</summary>
+		/// <summary>One undo checkpoint per user gesture (click, drag start, field commit),
+		/// never per drag frame, or every mouse-move would be its own undo step.</summary>
 		private void SnapshotForUndo()
 		{
 			if (owner != null)
@@ -516,10 +487,9 @@ namespace KRAB.UI
 			RefreshSelectedRow();
 		}
 
-		/// <summary>Mirrors every keyframe's time across the domain's midpoint (value
-		/// untouched) — this reverses the keys' time order, so the array is rebuilt
-		/// back-to-front to keep it ascending, and a selected point's index is
-		/// remapped to the same physical point instead of jumping to a different one.</summary>
+		/// <summary>Mirrors every keyframe's time across the domain's midpoint, value
+		/// untouched. That reverses the time order, so the array is rebuilt back-to-front
+		/// to stay ascending and the selected index is remapped to the same point.</summary>
 		private void FlipHorizontal()
 		{
 			SnapshotForUndo();
@@ -585,12 +555,9 @@ namespace KRAB.UI
 			}
 		}
 
-		/// <summary>Moves the dragged dot and reshapes the line in place, without touching
-		/// any GameObject — RedrawGraph() destroys and recreates every dot, including the
-		/// one Unity's EventSystem is actively mid-drag on, which silently stops delivering
-		/// further OnDrag calls to a destroyed target (in-game report, 2026-07-15: a point
-		/// only crept by ~0.01 per grab instead of following the mouse — that's the one
-		/// OnDrag call that lands before the recreated dot orphans the gesture).</summary>
+		/// <summary>Moves the dragged dot and reshapes the line in place, touching no
+		/// GameObject: RedrawGraph() would destroy the dot the EventSystem is mid-drag
+		/// on, and a destroyed target stops receiving OnDrag.</summary>
 		private void UpdateLiveDrag(int index)
 		{
 			List<Vector2> samples = new List<Vector2>(48);
@@ -686,9 +653,9 @@ namespace KRAB.UI
 			cursorText.text = rawInput.ToString("F2") + " → " + curve.Evaluate(rawInput).ToString("F2");
 		}
 
-		/// <summary>Live value flowing into the Remap's port 0 (its raw input) — the same
-		/// upstream-lookup KrabEditorWindow uses for per-node telemetry, reused here to
-		/// drive the cursor. False (no mark shown) if unconnected or nothing to read yet.</summary>
+		/// <summary>Live value flowing into the Remap's port 0 (its raw input), by the same
+		/// upstream lookup KrabEditorWindow uses for per-node telemetry. False, and no mark
+		/// shown, if the port is unconnected or there is nothing to read yet.</summary>
 		private bool TryGetLiveInput0(out float value)
 		{
 			value = 0f;

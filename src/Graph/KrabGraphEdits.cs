@@ -5,11 +5,9 @@ using System.Text;
 namespace KRAB.Graph
 {
 	/// <summary>
-	/// Composite edit operations for the editor UI (M2). Each method mutates the
-	/// graph through the KrabGraph primitives and keeps the invariants validation
-	/// relies on (contiguous ports on dynamic operators, weights list in step with
-	/// ports). Callers wrap every operation in the window's Mutate() so a snapshot
-	/// is pushed for undo and the module re-persists/revalidates/recompiles after.
+	/// Composite edit operations for the editor UI, built on the KrabGraph primitives.
+	/// They keep the invariants validation relies on: contiguous ports on dynamic
+	/// operators, weights list in step with ports. Callers wrap each one in Mutate().
 	/// </summary>
 	public static class KrabGraphEdits
 	{
@@ -44,10 +42,9 @@ namespace KRAB.Graph
 		}
 
 		/// <summary>
-		/// Operators whose arity matches the given term count, in CycleableOperators
-		/// order (current subtype included, if it fits). Shared by CompatibleOperators
-		/// (which strips the current one, for the "is there another option" check) and
-		/// CycleOperator (which needs the current one's position to advance from it).
+		/// Operators whose arity matches the given term count, in CycleableOperators order,
+		/// current subtype included if it fits. CompatibleOperators strips the current one;
+		/// CycleOperator needs its position to advance from it.
 		/// </summary>
 		private static List<string> ArityMatches(int terms)
 		{
@@ -77,24 +74,9 @@ namespace KRAB.Graph
 		}
 
 		/// <summary>
-		/// Switch a group's operator to the next arity-compatible one (cycle control).
-		/// Advances from the current subtype's position in CycleableOperators order and
-		/// wraps around, so repeated presses visit every compatible operator in turn
-		/// (picking the first candidate every time, as an earlier version did, made
-		/// WeightedSum/Product the only reachable pair since WeightedSum's MinInputs=1
-		/// almost always fits and sits first in the array).
-		///
-		/// Also the escape hatch for a group that removing a term left below its own
-		/// minimum arity (e.g. an And/Or/Product with only 1 term left after a
-		/// removal, or generally any dynamic op whose MinInputs no longer holds):
-		/// such a group's own subtype is absent from the arity-matching list
-		/// (IndexOf returns -1), so this lands on the first compatible operator —
-		/// typically WeightedSum, since it accepts any arity ≥ 1 — instead of
-		/// refusing to act just because only one *other* option exists. In-game
-		/// feedback (2026-07-06) asked for exactly this: harmonize the "stuck at a
-		/// fixed arity" case (GatedBlend etc., already escapable — its own subtype
-		/// is one of several arity matches) with the "stuck below minimum" case
-		/// (previously required adding a term back instead of cycling out).
+		/// Switch a group's operator to the next arity-compatible one, advancing from
+		/// the current subtype's position and wrapping around. A group left below its
+		/// own minimum arity is absent from the list, so it lands on the first match.
 		/// </summary>
 		public static bool CycleOperator(KrabGraph graph, KrabNode group)
 		{
@@ -113,7 +95,7 @@ namespace KRAB.Graph
 			return true;
 		}
 
-		/// <summary>Add a term (Constant 0 placeholder; the M3 picker will offer real sources).</summary>
+		/// <summary>Append a term to a dynamic group as a Constant 0 placeholder, which the source picker then replaces.</summary>
 		public static KrabNode AddTerm(KrabGraph graph, KrabNode group)
 		{
 			int port = CountInputPorts(graph, group);
@@ -125,33 +107,25 @@ namespace KRAB.Graph
 		}
 
 		/// <summary>
-		/// Single/triple-input "shaping" operators that combine no terms of their own
-		/// (Remap, Derivative, SlewRate, Comparator, Hold) — as opposed to the N-ary
-		/// combiners in CycleableOperators. They're not reachable via the operator-cycle
-		/// button (that rotation is for combination semantics, not arity alone) and the
-		/// source picker only offers SOURCE-kind subtypes: without this list there was
-		/// no way at all to add one from the editor (found while writing the fase-2
-		/// test protocol, 2026-07-10 — a real gap, not a design choice).
+		/// Shaping operators that combine no terms of their own (Remap, Derivative,
+		/// SlewRate, Comparator, Hold), as opposed to the N-ary combiners in
+		/// CycleableOperators. The editor can only add one through this list.
 		/// </summary>
 		public static readonly string[] InsertableFilters =
 			{ "Remap", "Derivative", "Integrator", "SlewRate", "Comparator", "Hold" };
 
 		/// <summary>
-		/// Pure trigonometric functions (Sin/Cos/Tan/Asin/Acos/Atan/Atan2), inserted
-		/// via the same "turn this leaf into an operator" mechanism as InsertableFilters
-		/// but rendered as their own labeled sub-section (no internal state or params,
-		/// unlike the shaping filters above) — split out 2026-08-22 at user request.
+		/// Pure trigonometric functions, inserted through the same "turn this leaf into an
+		/// operator" mechanism as InsertableFilters but rendered as their own labeled
+		/// sub-section. Unlike the shaping filters they carry no internal state or params.
 		/// </summary>
 		public static readonly string[] InsertableTrigFunctions =
 			{ "Sin", "Cos", "Tan", "Asin", "Acos", "Atan", "Atan2" };
 
 		/// <summary>
 		/// Add a nested sub-group term of the given subtype (the "visual parentheses"),
-		/// auto-filling however many ports it needs (its MinInputs if dynamic, else its
-		/// fixed arity) with Constant(0) placeholders so it validates immediately —
-		/// generalized 2026-07-10 from "always WeightedSum" so it also covers
-		/// InsertableFilters (1 port for Remap/Derivative/SlewRate/Comparator, 3 for
-		/// Hold) via the same mechanism.
+		/// auto-filling however many ports it needs (MinInputs if dynamic, else the fixed
+		/// arity) with Constant(0) placeholders so it validates immediately.
 		/// </summary>
 		public static KrabNode AddSubgroup(KrabGraph graph, KrabNode group, string subtype = "WeightedSum")
 		{
@@ -164,19 +138,9 @@ namespace KRAB.Graph
 		}
 
 		/// <summary>
-		/// Fills a brand-new node's required ports (0..N-1) with Constant(0)
-		/// placeholders, using explicit indices rather than AddTerm/CountInputPorts.
-		///
-		/// Bug fixed 2026-07-10 (in-game feedback: Hold showed "0,0,0" with no picker
-		/// on any port; same for Derivative/SlewRate/Comparator): CountInputPorts on a
-		/// FIXED-arity node always returns its fixed arity (e.g. 3 for Hold),
-		/// regardless of how many ports are already linked — correct for its original
-		/// purpose (the expected total), wrong when AddTerm used it to mean "the next
-		/// empty slot". Looping AddTerm to fill a fresh Hold therefore linked all 3
-		/// placeholders at the SAME phantom port index 3 (one past the valid 0..2
-		/// range), leaving ports 0-2 completely unlinked. Filling by explicit index
-		/// here sidesteps the ambiguity entirely: on a brand-new node there is no
-		/// "already filled" state to account for.
+		/// Fills a brand-new node's required ports (0..N-1) with Constant(0) placeholders,
+		/// by explicit index rather than AddTerm: CountInputPorts on a fixed-arity node
+		/// always returns its fixed arity, so it cannot mean "the next empty slot".
 		/// </summary>
 		private static void FillRequiredPorts(KrabGraph graph, KrabNode node)
 		{
@@ -326,7 +290,7 @@ namespace KRAB.Graph
 			}
 		}
 
-		// ---- source picker support (M3) ----
+		// ---- source picker support ----
 
 		/// <summary>Unlink whatever feeds this port (pruning an exclusive subtree) without moving other ports.</summary>
 		private static void ClearPort(KrabGraph graph, KrabNode target, int port)
@@ -359,17 +323,9 @@ namespace KRAB.Graph
 		}
 
 		/// <summary>
-		/// Replace whatever feeds a port with a fresh operator (dynamic combiner or one
-		/// of InsertableFilters), auto-filling however many ports it needs — the nested
-		/// counterpart of AddSubgroup/AddTerm: those only let you APPEND a new term to a
-		/// dynamic group, so a fixed-arity node's single port (e.g. SlewRate's, or
-		/// Comparator's) had no way to become an operator itself rather than a plain
-		/// source, since fixed-arity nodes never render "+Term/+Group/+Filter" on their
-		/// own row. This is reachable from the SAME per-port picker every source leaf
-		/// already opens, regardless of the parent's arity kind (2026-07-10, found
-		/// while planning fase-2 testing: without it, chains like Remap→SlewRate or
-		/// Comparator→Not — the latter already present in the hand-authored test
-		/// graph — were simply not buildable in the editor).
+		/// Replace whatever feeds a port with a fresh operator (dynamic combiner or one of
+		/// InsertableFilters), auto-filling its required ports. Unlike AddSubgroup/AddTerm it
+		/// works from the per-port picker, so a fixed-arity node's port can become an operator.
 		/// </summary>
 		public static KrabNode ReplaceTermWithOperator(KrabGraph graph, KrabNode target, int port, string subtype)
 		{
@@ -488,12 +444,9 @@ namespace KRAB.Graph
 		}
 
 		/// <summary>
-		/// Serializes the whole input/operator subtree feeding a port (an output's port
-		/// 0, in practice) into a portable string — the clipboard for "replicate this
-		/// combination on a different output tab" (in-game request, 2026-07-17). Original
-		/// ids are kept in the clipboard text itself; PasteSubtree mints fresh ones on the
-		/// way back in, so pasting never collides with the live graph. Null when the port
-		/// has nothing wired yet (an empty/default-only port has nothing to copy).
+		/// Serializes the whole input/operator subtree feeding a port into a portable string,
+		/// so a combination can be replicated on another output. The clipboard text keeps the
+		/// original ids; PasteSubtree mints fresh ones. Null when the port has nothing wired.
 		/// </summary>
 		public static string CopySubtree(KrabGraph graph, KrabNode target, int port)
 		{
@@ -533,11 +486,9 @@ namespace KRAB.Graph
 		}
 
 		/// <summary>
-		/// Clones a subtree copied by CopySubtree — fresh ids throughout, so pasting the
-		/// same clipboard onto several outputs (or back onto the one it came from) always
-		/// yields independent copies, never a shared/aliased subtree — and wires the
-		/// clone into the port, replacing whatever fed it before (same ClearPort as the
-		/// other Replace* operations). False when the clipboard is empty/unparseable.
+		/// Clones a subtree copied by CopySubtree with fresh ids throughout, so every paste
+		/// yields an independent copy, then wires the clone into the port, replacing whatever
+		/// fed it before. False when the clipboard is empty or unparseable.
 		/// </summary>
 		public static bool PasteSubtree(KrabGraph graph, KrabNode target, int port, string clipboardText)
 		{

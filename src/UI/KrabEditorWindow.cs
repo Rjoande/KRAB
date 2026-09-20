@@ -10,23 +10,16 @@ using UnityEngine.UI;
 namespace KRAB.UI
 {
 	/// <summary>
-	/// Editor window. M1: UGUI shell built in code, tree-of-groups view, live flight
-	/// telemetry, condition simulator in the editor. M2: live editing — parameter
-	/// fields, add/remove terms/groups/outputs, operator cycling, snapshot-based
-	/// undo/redo, validation strip with node highlighting.
-	/// Every mutation flows through Mutate(): snapshot for undo, then the module
-	/// persists/revalidates/recompiles, then the content is rebuilt.
+	/// Editor window: UGUI shell built in code, tree-of-groups view, live telemetry,
+	/// in-editor condition simulator, live editing with snapshot undo/redo. Every
+	/// mutation flows through Mutate(): snapshot, persist/revalidate/recompile, rebuild.
 	/// </summary>
 	public class KrabEditorWindow : MonoBehaviour
 	{
 		private const float WindowWidth = 620f;
 		// Fixed heights for the two variable-length lists (tree, simulator sliders):
-		// with many terms/sources the WINDOW used to grow past the screen edge and
-		// become unreachable (in-game feedback, 2026-07-09) — these lists now scroll
-		// internally instead, so the window's total height stays constant regardless
-		// of graph size. That constancy is also what keeps the titlebar (and its
-		// undo/redo buttons) from drifting, the same fix in spirit as pinning the
-		// operator-cycle button to a fixed-width slot.
+		// they scroll internally so the window's total height stays constant
+		// whatever the graph size, keeping the titlebar from drifting.
 		private const float TreeAreaHeight = 260f;
 		private const float SimAreaHeight = 130f;
 		private const float RefreshInterval = 0.1f;
@@ -36,19 +29,18 @@ namespace KRAB.UI
 
 		private static KrabEditorWindow current;
 
-		// Copy/paste of a whole input/operator subtree across output tabs (in-game
-		// request, 2026-07-17). Static and session-scoped like `current` itself — a
-		// plain in-memory clipboard, not persisted; cleared on a KSP restart.
+		// Copy/paste of a whole input/operator subtree across output tabs. Static and
+		// session-scoped like `current`: a plain in-memory clipboard, not persisted,
+		// cleared on a KSP restart.
 		private static string subtreeClipboard;
 
-		// Footer toggles (in-game request, 2026-08-20), both session-scoped the same
-		// way: survive closing/reopening the window, reset on a KSP restart.
+		// Footer toggles, both session-scoped: survive closing/reopening the window,
+		// reset on a KSP restart.
 		private static bool showNodeIds;
 		private static bool invertHighlightPriority;
 
 		// Last on-screen position (top-center, matching windowRect's own pivot), so
-		// reopening the window lands where it was left instead of snapping back to the
-		// default (in-game request, 2026-08-23). Session-scoped, not persisted.
+		// reopening lands where the window was left. Session-scoped, not persisted.
 		private static Vector2? lastWindowPosition;
 
 		private ModuleKRABController module;
@@ -77,13 +69,9 @@ namespace KRAB.UI
 			public float factor;
 			public float offset;
 			public string suffix;
-			// AxisOutput preview only: clamp the converted reading to the target
-			// field's real range. Without this, an upstream operator producing values
-			// outside 0..1 (e.g. a raw physical reading used directly, no Remap) shows
-			// nonsense like "442°" on a 0-180° hinge — even though the actual write to
-			// the vessel is always clamped (Mathf.InverseLerp already clamps its t to
-			// 0..1), so nothing wrong happens in flight, only the preview lied about it
-			// (in-game feedback, 2026-07-09).
+			// AxisOutput preview only: clamp the converted reading to the target field's
+			// real range. The write to the vessel is always clamped anyway
+			// (Mathf.InverseLerp clamps its t to 0..1); this keeps the preview honest.
 			public bool hasClamp;
 			public float clampMin;
 			public float clampMax;
@@ -95,7 +83,7 @@ namespace KRAB.UI
 		private readonly List<string> redoStack = new List<string>();
 		private float nextRefresh;
 
-		// ---- M3 pickers ----
+		// ---- pickers ----
 
 		private enum PickerKind
 		{
@@ -110,33 +98,23 @@ namespace KRAB.UI
 		private PickerKind pickerKind;
 		private KrabNode pickerTarget;
 		private int pickerPort;
-		// Non-null while TargetField is picking a part+field for a brand-new source
-		// (Part Field) instead of retargeting an existing output — pickerTarget:pickerPort
-		// still name the CONSUMER port in this case, unlike StartPartPick(output) where
-		// pickerTarget IS the node being retargeted. Set by StartPartFieldPick.
+		// Non-null while TargetField picks a part+field for a brand-new Part Field
+		// source: pickerTarget:pickerPort then name the CONSUMER port, unlike
+		// StartPartPick(output) where pickerTarget is the node being retargeted.
 		private string pickerNewSourceSubtype;
 		private bool pickingPart;
 		private Part pickedPart;
 		private Part hoverPart;
-		// hoverPart's whole symmetry group during a scene pick (point 1, 2026-08-20 —
-		// same "preview the whole group" behavior as KRILL): hoverPart itself is still
+		// hoverPart's whole symmetry group during a scene pick. hoverPart itself is
 		// tracked separately since it's what a click actually confirms.
 		private readonly List<Part> hoverGroup = new List<Part>();
 		// Captured on mouse-down, confirmed on mouse-up (see HandlePartPicking).
 		private Part pendingPickPart;
 		private const string PickLockId = "KRAB_EDITOR_PICK";
 
-		// Persistent highlight on the active output tab's tree (in-game request,
-		// 2026-07-24, extended 2026-08-20 to cover symmetry siblings and Part Field
-		// sources, not just the single bound target — same base mechanism as KRILL's
-		// KrillWindow, same "don't clobber it with the transient pick-hover" guard).
-		// Two families, each with a direct/kinship pair: Target = this output's bound
-		// part; Source = every part a Part Field in this output's tree actually reads
-		// from ("which part feeds THIS output" — scoped to the active tab on purpose).
-		// Kinship uses a distinct hue, not just a dimmer version of the direct color —
-		// a desaturated blue read as "the same thing, fainter" in review. Default
-		// priority is target-family over source-family; invertHighlightPriority (footer
-		// toggle) flips it for players who want to eyeball sources instead.
+		// Persistent highlight on the active output tab's tree. Two families, each with
+		// a direct/kinship (symmetry sibling) pair: Target = this output's bound part;
+		// Source = every part a Part Field in this output's tree reads from.
 		private readonly Dictionary<Part, Color> highlightedParts = new Dictionary<Part, Color>();
 		private static readonly Color TargetHighlightColor = new Color(0.18f, 0.35f, 0.85f);
 		private static readonly Color TargetKinshipColor = new Color(0.42f, 0.28f, 0.82f);
@@ -212,10 +190,9 @@ namespace KRAB.UI
 			Close();
 		}
 
-		/// <summary>Re-validates the target highlight when the active vessel changes —
-		/// the bound target part may have gone out of load range (bug found in
-		/// KRILL's own version of this mechanism: switching vessels away could leave
-		/// a stale highlight on a part from a no-longer-relevant ship).</summary>
+		/// <summary>Re-validates the target highlight when the active vessel changes: the
+		/// bound target part may have gone out of load range, leaving a stale highlight
+		/// on a part of a no-longer-relevant ship.</summary>
 		private void OnActiveVesselChanged(Vessel v)
 		{
 			UpdatePartHighlights();
@@ -297,9 +274,8 @@ namespace KRAB.UI
 		}
 
 		/// <summary>partFieldMaxChars lets a caller ask for the untruncated text (pass
-		/// int.MaxValue) — used by NodeFullLabel for the "what does this really say"
-		/// tooltip (in-game request, 2026-08-21). Every other case here is never
-		/// truncated regardless, so the parameter is simply unused for them.</summary>
+		/// int.MaxValue). Only the Part Field case truncates; every other case ignores
+		/// the parameter.</summary>
 		private static string SourceDetail(KrabNode node, int partFieldMaxChars)
 		{
 			switch (node.Info.name)
@@ -331,9 +307,8 @@ namespace KRAB.UI
 					{
 						return Loc("#LOC_KRAB_ui_targetMissing");
 					}
-					// Whole "part - field" pair truncated together, not each half on its
-					// own (in-game feedback, 2026-08-14: the per-output 15-char rule left
-					// this too long and it overran the simulator slider row).
+					// Truncate the whole "part - field" pair together, not each half on its
+					// own, or the result overruns the simulator slider row.
 					return Truncate(pfPart.partInfo.title + " - " + pfLabel, partFieldMaxChars);
 				default:
 					return "";
@@ -341,12 +316,9 @@ namespace KRAB.UI
 		}
 
 		/// <summary>
-		/// Full "Name · Detail" display string for a node — the tree row's source-leaf
-		/// button, the simulator row, and the REUSE A SIGNAL list all built this by hand
-		/// (NodeName(node) + " · " + detail); centralized here so all three special-case
-		/// Part Field the same way: with a "part - field" pair already shown, prefixing
-		/// it with "Part Field ·" is redundant (in-game feedback, 2026-08-14) — unlike
-		/// e.g. "Pitch" alone, which doesn't say whether it's PlayerAxis or ScriptAxis.
+		/// Full "Name · Detail" display string for a node, shared by the tree row, the
+		/// simulator row and the REUSE A SIGNAL list. Part Field shows its "part - field"
+		/// pair alone, since prefixing it with the subtype name adds nothing.
 		/// </summary>
 		private static string NodeLabel(KrabNode node)
 		{
@@ -365,30 +337,24 @@ namespace KRAB.UI
 			return NodeName(node) + " · " + detail;
 		}
 
-		/// <summary>The untruncated version of NodeLabel, for a tooltip on whatever
-		/// might have been cut short (in-game request, 2026-08-21) — today only Part
-		/// Field's "part - field" pair can actually be shorter than this.</summary>
+		/// <summary>The untruncated version of NodeLabel, for a tooltip on whatever was
+		/// cut short. Only Part Field's "part - field" pair is ever truncated.</summary>
 		private static string NodeFullLabel(KrabNode node)
 		{
 			return NodeLabel(node, int.MaxValue);
 		}
 
-		/// <summary>Node id suffix ("n4"-style). Always shown in the REUSE A SIGNAL
-		/// list — that's the one place it was already load-bearing (in-game feedback,
-		/// 2026-08-20: picking the right node in a complex/multi-output graph is a
-		/// guess without it) — and gated behind the footer's id toggle everywhere
-		/// else, where it's convenience rather than the only way to tell nodes apart.</summary>
+		/// <summary>Node id suffix ("n4"-style). Always shown in the REUSE A SIGNAL list,
+		/// the one place it is the only way to tell candidate nodes apart; gated behind
+		/// the footer's id toggle everywhere else.</summary>
 		private static string IdSuffix(KrabNode node)
 		{
 			return " [" + node.id + "]";
 		}
 
-		/// <summary>Simulator row label: NodeLabel plus the id suffix when shown,
-		/// capped to fit the row's fixed-width column next to the slider — tighter by
-		/// SimulatorLabelIdMargin while ids are on, since the "[nX]" suffix was long
-		/// enough to run the whole label into the slider (in-game feedback,
-		/// 2026-08-21). Local to the simulator on purpose: the tree row and REUSE A
-		/// SIGNAL list have more room and aren't affected.</summary>
+		/// <summary>Simulator row label: NodeLabel plus the id suffix when shown, capped
+		/// to fit the fixed-width column next to the slider — tighter by
+		/// SimulatorLabelIdMargin while ids are on, to leave room for the "[nX]" suffix.</summary>
 		private static string SimulatorRowLabel(KrabNode node)
 		{
 			string label = NodeLabel(node);
@@ -409,11 +375,8 @@ namespace KRAB.UI
 		}
 
 		/// <summary>Just the snapshot half of Mutate(), exposed for KrabCurveWindow: a
-		/// curve-drag gesture calls this once (drag start / click / field commit) then
-		/// does its own persist+recompile — a full Mutate() per drag frame would rebuild
-		/// the whole tree and fight the drag. Without this, curve edits had no undo
-		/// checkpoint of their own and Undo jumped past them to the prior real Mutate()
-		/// (in-game report, 2026-07-15 — undo erased the Remap's own creation too).</summary>
+		/// curve-drag calls this once per gesture then does its own persist+recompile,
+		/// since a full Mutate() per drag frame would rebuild the tree and fight the drag.</summary>
 		internal void CaptureUndoSnapshot()
 		{
 			string snapshot = module.CaptureGraphSnapshot();
@@ -485,10 +448,9 @@ namespace KRAB.UI
 		{
 			GameEvents.onGameSceneLoadRequested.Add(OnSceneChange);
 			GameEvents.onVesselChange.Add(OnActiveVesselChanged);
-			// In-game report, 2026-08-15: the window ignored F2 (hide UI) and Esc (pause
-			// menu) — every other KSP UI hides for both. Toggling gameObject.SetActive
-			// stops Update/LateUpdate too (cheap while hidden) without tearing down any
-			// state; re-showing needs no rebuild, Unity just resumes calling them.
+			// Hide for F2 (hide UI) and Esc (pause menu), like every other KSP UI.
+			// Toggling gameObject.SetActive also stops Update/LateUpdate without tearing
+			// down state; re-showing needs no rebuild, Unity just resumes calling them.
 			GameEvents.onHideUI.Add(HandleHideUI);
 			GameEvents.onShowUI.Add(HandleShowUI);
 			GameEvents.onGamePause.Add(HandleGamePause);
@@ -503,11 +465,9 @@ namespace KRAB.UI
 			gameObject.AddComponent<GraphicRaycaster>();
 
 			windowRect = KrabUi.Bordered("Window", transform, KrabUi.Win, KrabUi.Line);
-			// Top-anchored (in-game report, 2026-08-23): with a centered pivot, growing
-			// the window via ContentSizeFitter (more nodes = taller content) pushed the
-			// titlebar upward by half the added height, risking it off-screen if the
-			// window was already near the top. Anchoring pivot+position to the top edge
-			// means growth only ever extends downward — the titlebar is the fixed point.
+			// Top-anchored pivot: with a centered pivot, ContentSizeFitter growth pushes
+			// the titlebar up by half the added height, possibly off-screen. Anchoring to
+			// the top edge makes growth extend downward only, with the titlebar fixed.
 			windowRect.anchorMin = windowRect.anchorMax = new Vector2(0.5f, 0.5f);
 			windowRect.pivot = new Vector2(0.5f, 1f);
 			windowRect.anchoredPosition = lastWindowPosition ?? new Vector2(160f, 70f);
@@ -533,11 +493,9 @@ namespace KRAB.UI
 			KrabUi.Size(bar.gameObject, -1f, 34f);
 			KrabUi.Horizontal(bar.gameObject, 8, 8f);
 
-			// Editable name (in-game feedback, 2026-07-10: there was no way at all to
-			// rename a KRAB — displayName is a plain string KSPField, and stock KSP has
-			// no built-in editable-text PAW control for it, unlike UI_FloatRange/
-			// UI_Toggle for numbers/bools. The editor window is the natural place,
-			// same as KAL's own name field lives in its custom window, not the PAW).
+			// Editable name: displayName is a plain string KSPField and stock KSP has no
+			// editable-text PAW control for it, unlike UI_FloatRange/UI_Toggle for
+			// numbers/bools, so the rename lives here as KAL's own does in its window.
 			GameObject titleRow = KrabUi.Go("TitleRow", bar.transform);
 			KrabUi.Horizontal(titleRow, 0, 6f);
 			KrabUi.Size(titleRow, -1f, 22f, 1f);
@@ -559,10 +517,6 @@ namespace KRAB.UI
 				10, KrabUi.Malachite, TextAnchor.MiddleRight);
 			KrabUi.Size(badge.gameObject, 130f, 22f);
 
-			// The only close control now (in-game request, 2026-07-19: the redundant
-			// "Close" button at the bottom of the window is gone — see BuildDetail).
-			// Kept as the plain glyph rather than icon_close (in-game feedback,
-			// 2026-07-20: the custom close icon didn't read well).
 			KrabUi.TextButton(bar, "✕", Close, KrabUi.Panel2, KrabUi.TanDim, 13, 26f, 24f);
 
 			DragHandler drag = bar.gameObject.AddComponent<DragHandler>();
@@ -663,10 +617,9 @@ namespace KRAB.UI
 			errorNodes.Clear();
 			warnNodes.Clear();
 			issues.AddRange(Graph.Validate());
-			// Graph.Validate() is scene-agnostic (also runs from KrabGraphSelfTest with no
-			// vessel loaded), so live part/field resolution can't live there. This is a
-			// UI-only addition, same warn-visible-never-silent policy as the missing-target
-			// case already covered by #LOC_KRAB_ui_targetMissing on the tree row itself.
+			// Graph.Validate() is scene-agnostic (it also runs from KrabGraphSelfTest with
+			// no vessel loaded), so live part/field resolution can't live there. This is a
+			// UI-only addition.
 			foreach (KrabNode node in Graph.Nodes)
 			{
 				if (node.IsKnown && node.Info.name == "PartField"
@@ -750,10 +703,9 @@ namespace KRAB.UI
 			KrabUi.Horizontal(row, 0, 6f);
 			KrabUi.Size(row, -1f, TabStripHeight);
 
-			// A plain HorizontalLayoutGroup would squeeze every tab once their combined
-			// width exceeded the row — past ~4 outputs the labels became unreadable
-			// (in-game feedback, 2026-07-17). A horizontal scroll strip keeps each tab
-			// at its natural width instead; the mouse wheel scrolls it sideways.
+			// A plain HorizontalLayoutGroup squeezes every tab once their combined width
+			// exceeds the row, making labels unreadable past ~4 outputs. A horizontal
+			// scroll strip keeps each tab at its natural width; the wheel scrolls it.
 			RectTransform strip = KrabUi.HScrollList(row.transform, TabStripHeight);
 			foreach (KrabNode node in outputNodes)
 			{
@@ -766,14 +718,9 @@ namespace KRAB.UI
 					active ? KrabUi.GreenHi : KrabUi.Muted, 12, 0f, 26f);
 				if (active)
 				{
-					// Panel2 vs Panel alone read as almost the same shade (in-game
-					// feedback, 2026-08-20) — a bottom accent strip plus the marker/text
-					// tint above are the two changes together, not either alone. Pivot
-					// (0.5, 1) + a small negative Y anchors the strip's TOP just below the
-					// button's own bottom edge, so it hangs entirely outside the button
-					// instead of eating into its 3px bottom padding — the first version
-					// grew upward from the edge and clipped through the label's text
-					// (in-game feedback, 2026-08-20).
+					// Panel2 vs Panel alone read as almost the same shade, so the active tab
+					// also gets a bottom accent strip. Pivot (0.5, 1) plus a small negative Y
+					// hangs it fully below the button instead of eating its bottom padding.
 					RectTransform accent = (RectTransform)KrabUi.Go("ActiveAccent", tab.transform).transform;
 					accent.anchorMin = new Vector2(0f, 0f);
 					accent.anchorMax = new Vector2(1f, 0f);
@@ -804,9 +751,9 @@ namespace KRAB.UI
 
 		private string TabTitle(KrabNode node)
 		{
-			// A custom label always wins — with several outputs of the same kind, the
-			// auto-detected name ("Axis Output" until bound, or a raw field name after)
-			// made the tab row ambiguous (in-game feedback, 2026-07-15).
+			// A custom label always wins: with several outputs of the same kind the
+			// auto-detected name ("Axis Output" until bound, a raw field name after)
+			// makes the tab row ambiguous.
 			string label = node.GetString("label", "");
 			if (!string.IsNullOrEmpty(label))
 			{
@@ -920,13 +867,11 @@ namespace KRAB.UI
 			KrabUi.Vertical(right, 0, 3f);
 			KrabUi.Size(right, 130f, -1f);
 
-			// Copy/paste the whole input/operator subtree feeding this output's port 0 —
-			// lets the player build a combination once and replicate it on another
-			// output tab instead of rebuilding it by hand (in-game request, 2026-07-17).
+			// Copy/paste the whole input/operator subtree feeding this output's port 0,
+			// so a combination built once can be replicated on another output tab.
 			GameObject copyRow = KrabUi.Go("CopyPaste", right.transform);
 			KrabUi.Horizontal(copyRow, 0, 5f);
-			// Right-aligned to match the VALUE/✕ row below it (in-game feedback,
-			// 2026-07-19: with nothing to anchor to, the icons looked adrift).
+			// Right-aligned to match the VALUE/✕ row below it.
 			KrabUi.Spacer(copyRow.transform);
 			bool hasSubtree = Graph.FindLinkTo(output.id, 0) != null;
 			Button copyButton = KrabUi.ImageIconButton(copyRow.transform, "copy",
@@ -971,11 +916,8 @@ namespace KRAB.UI
 
 		/// <summary>
 		/// Target description plus a state color: normal (bound), muted (never bound),
-		/// or danger — the bound part no longer exists on this craft (in-game feedback,
-		/// 2026-07-09: deleting a target part left the binding looking valid). The
-		/// binding itself is left untouched — flagged, not auto-cleared, since a part
-		/// can come back (undo, re-attach) and silently discarding a player's work on a
-		/// state we can't fully verify is the wrong default.
+		/// or danger (the bound part no longer exists on this craft). The binding is
+		/// flagged, never auto-cleared: a part can come back via undo or re-attach.
 		/// </summary>
 		private string DescribeTarget(KrabNode output, out Color color)
 		{
@@ -1001,17 +943,14 @@ namespace KRAB.UI
 
 		private const int TargetLabelMaxChars = 15;
 		private const int PartFieldLabelMaxChars = 35;
-		// Simulator row label column: fixed-width, sits right next to the slider — an
-		// overlong label runs into it. 35 already matched this column's width when
-		// PartFieldLabelMaxChars was tuned; the extra -3 margin when node ids are shown
-		// makes room for the "[nX]" suffix, which pushed some labels over the edge
-		// (in-game feedback, 2026-08-21).
+		// Simulator row label column is fixed-width and sits next to the slider, so an
+		// overlong label runs into it. 35 matches that column's width; the -3 margin
+		// makes room for the "[nX]" suffix when node ids are shown.
 		private const int SimulatorLabelMaxChars = 35;
 		private const int SimulatorLabelIdMargin = 3;
 
-		/// <summary>Caps a string to TargetLabelMaxChars total, ellipsizing the tail
-		/// (in-game request, 2026-07-24: long part/field names could stretch the
-		/// target card past its layout).</summary>
+		/// <summary>Default cap, sized so a long part/field name can't stretch the target
+		/// card past its layout.</summary>
 		private static string Truncate(string text)
 		{
 			return Truncate(text, TargetLabelMaxChars);
@@ -1027,13 +966,9 @@ namespace KRAB.UI
 			return text.Substring(0, maxChars - 1) + "…";
 		}
 
-		/// <summary>Prefers "Part title - Field/action GUI name" (in-game feedback,
-		/// 2026-07-15: the raw persisted name, e.g. "targetAngle", told the player
-		/// nothing when several outputs point at similar fields) — falls back to the
-		/// raw persisted name if the live field/action can't be resolved right now (e.g.
-		/// the module happens to be unloaded), so the target still shows something.
-		/// Part name and field/action name are each truncated independently, so a
-		/// long part title doesn't push the field name out of sight.</summary>
+		/// <summary>Prefers "Part title - Field/action GUI name", falling back to the raw
+		/// persisted name when the live field/action can't be resolved (e.g. an unloaded
+		/// module). Both halves truncate independently so neither hides the other.</summary>
 		private static string ResolveTargetLabel(KrabNode output, Part part, string rawField)
 		{
 			string partName = Truncate(part.partInfo.title);
@@ -1212,7 +1147,7 @@ namespace KRAB.UI
 			}
 			if (node.id == KrabCurveWindow.OpenNodeId)
 			{
-				return KrabUi.Malachite; // M4: term stays highlighted while its curve window is open
+				return KrabUi.Malachite; // term stays highlighted while its curve window is open
 			}
 			if (warnNodes.Contains(node.id))
 			{
@@ -1236,9 +1171,9 @@ namespace KRAB.UI
 			{
 				KrabUi.Size(KrabUi.Go("Indent", row.transform), depth * 18f, 4f);
 			}
-			// Cycle button goes BEFORE the (variable-width) name label, on a fixed-width
-			// slot, so its position on screen doesn't shift as the operator name changes
-			// length while clicking through several options in a row (in-game feedback).
+			// Cycle button goes BEFORE the variable-width name label, in a fixed-width
+			// slot, so it doesn't shift on screen as the operator name changes length
+			// while clicking through several options in a row.
 			if (isGroup && KrabGraphEdits.CompatibleOperators(Graph, node).Count > 0)
 			{
 				Button cycleButton = KrabUi.IconButton(row.transform, "↻",
@@ -1253,7 +1188,7 @@ namespace KRAB.UI
 			bool isSource = node.IsKnown && node.Info.kind == NodeKind.Source;
 			if (isSource && parentGroup != null)
 			{
-				// Source leaves: name + selection open the grouped source picker (M3).
+				// Source leaves: name + selection open the grouped source picker.
 				KrabNode capturedParent = parentGroup;
 				int capturedSlot = port;
 				Button sourceButton = KrabUi.TextButton(row.transform,
@@ -1281,11 +1216,9 @@ namespace KRAB.UI
 			KrabUi.Size(value.gameObject, 74f, 21f);
 			AddValueBinding(node, value);
 
-			// removable: direct child of a dynamic group (fixed-arity ports would go invalid).
-			// Slot is reserved either way (fixed 18px) — a conditional button here shifted
-			// the value column left on every row that had one, breaking the column's
-			// vertical alignment (in-game feedback, 2026-07-19; same fix as the cycle
-			// button's own CycleSpacer placeholder above).
+			// Removable: direct child of a dynamic group (fixed-arity ports would go
+			// invalid). The 18px slot is reserved either way, or the value column shifts
+			// left on rows without a button and loses its vertical alignment.
 			if (parentGroup != null && parentGroup.IsKnown && parentGroup.Info.HasDynamicInputs)
 			{
 				int capturedPort = port;
@@ -1404,12 +1337,9 @@ namespace KRAB.UI
 		}
 
 		/// <summary>
-		/// Optional clampMin/clampMax on WeightedSum and Integrator (in-game request,
-		/// 2026-08-16, after an unclamped Integrator's windup crashed a test flight):
-		/// the two fields alone can't tell "absent" from "zero", so presence itself is
-		/// the toggle — a button adds both at once with a wide-open default (-1000/1000,
-		/// practically unclamped until narrowed), an X removes both together. Never a
-		/// half-clamped state (only clampMin set): the pair is atomic.
+		/// Optional clampMin/clampMax on WeightedSum and Integrator. Presence is the
+		/// toggle, since the fields can't tell "absent" from "zero": a button adds both
+		/// at a wide-open -1000/1000, an X removes both. The pair is atomic.
 		/// </summary>
 		private void BuildClampFields(Transform parent, KrabNode node)
 		{
@@ -1435,9 +1365,8 @@ namespace KRAB.UI
 		}
 
 		/// <summary>
-		/// Inline editable parameters per subtype. Vocabulary params (channel, metric,
-		/// group) are free text until the M3 pickers land: a typo simply disables the
-		/// node with a warning, never a crash (tolerant-parse policy).
+		/// Inline editable parameters per subtype. An unrecognized vocabulary value
+		/// disables the node with a warning, never a crash (tolerant-parse policy).
 		/// </summary>
 		private void BuildParamFields(Transform parent, KrabNode node)
 		{
@@ -1451,13 +1380,12 @@ namespace KRAB.UI
 					NumberField(parent, node, "value", "0");
 					break;
 				// ControllerInput / PlayerAxis / ScriptAxis / ActionGroupState /
-				// KrillGroupState / KrillAxisState carry no inline fields anymore: their
-				// selection lives in the source picker (the "Name · Detail ▾" button).
+				// KrillGroupState / KrillAxisState carry no inline fields: their selection
+				// lives in the source picker (the "Name · Detail ▾" button).
 				case "PhysicalState":
-					// Sample rate only affects flight (simulation mode bypasses sampling
-					// entirely — see PhysicalStateRuntime.Evaluate): showing a live field
-					// that visibly does nothing in the editor just confused testing
-					// (in-game feedback, 2026-07-09 — "typed a number, nothing happened").
+					// Sample rate only affects flight: simulation mode bypasses sampling
+					// entirely (see PhysicalStateRuntime.Evaluate), so the field would do
+					// nothing visible in the editor.
 					if (!Simulated)
 					{
 						ParamLabel(parent, "s", "#LOC_KRAB_tip_paramSampleRate");
@@ -1476,8 +1404,8 @@ namespace KRAB.UI
 				case "Remap":
 					if (node.HasNode("curve"))
 					{
-						// A curve overrides the four linear fields entirely (RemapRuntime) —
-						// showing both would suggest they still do something (M4).
+						// A curve overrides the four linear fields entirely (RemapRuntime),
+						// so they are hidden while one exists.
 						Button curveButton = KrabUi.ImageIconButton(parent, "curve",
 							() => KrabCurveWindow.Open(module, this, node),
 							KrabUi.Malachite, 20f);
@@ -1485,10 +1413,9 @@ namespace KRAB.UI
 					}
 					else
 					{
-						// Bare numbers with only a "→" between them gave no clue which pair
-						// was in vs out (in-game feedback, 2026-07-14) — labeled both sides.
-						// "in"/"out" alone still didn't say the two boxes were min/max
-						// (in-game feedback, 2026-07-15).
+						// Both sides carry a full "in (min-max)"/"out (min-max)" label: bare
+						// numbers say neither which pair is in vs out, nor that each pair
+						// is a min/max.
 						ParamLabel(parent, "in (min-max)", "#LOC_KRAB_tip_paramRemapRange");
 						NumberField(parent, node, "inMin", "0", 42f);
 						NumberField(parent, node, "inMax", "1", 42f);
@@ -1543,8 +1470,8 @@ namespace KRAB.UI
 			KrabUi.Vertical(panel.gameObject, 9, 6f);
 			KrabUi.Label(panel, Loc("#LOC_KRAB_ui_simTitle"), 10, KrabUi.TanDim);
 
-			// Fixed-height scroll area: the panel (and window) no longer grow with
-			// the number of sources (in-game feedback, 2026-07-09).
+			// Fixed-height scroll area: the panel (and window) don't grow with the
+			// number of sources.
 			RectTransform list = KrabUi.ScrollList(panel, SimAreaHeight);
 			bool anySlider = false;
 			foreach (KrabNode node in Graph.Nodes)
@@ -1582,9 +1509,8 @@ namespace KRAB.UI
 				}
 				else
 				{
-					// Slider stays canonical (SI); the readout always shows SI, plus the
-					// player's chosen unit in parentheses when it differs (dual format,
-					// in-game feedback 2026-07-09 — e.g. "20.7 m/s (41.2 kn)").
+					// Slider stays canonical (SI); the readout shows SI plus the player's
+					// chosen unit in parentheses when it differs, e.g. "20.7 m/s (41.2 kn)".
 					bool isPhysical = node.Info.name == "PhysicalState";
 					string metric = isPhysical ? node.GetString("metric", "") : "";
 					string displayUnit = isPhysical ? node.GetString("displayUnit", "") : "";
@@ -1611,7 +1537,7 @@ namespace KRAB.UI
 			KrabUi.Label(panel, Loc("#LOC_KRAB_ui_simHint"), 11, KrabUi.Muted);
 		}
 
-		/// <summary>Per-source slider ranges; per-metric defaults for physical sources (M1).</summary>
+		/// <summary>Per-source slider ranges; per-metric defaults for physical sources.</summary>
 		private static void GetSimRange(KrabNode node, out float min, out float max)
 		{
 			min = -1f;
@@ -1672,8 +1598,8 @@ namespace KRAB.UI
 				RectTransform strip = KrabUi.Bordered("Issues", contentHost, KrabUi.Panel, KrabUi.Line);
 				KrabUi.Vertical(strip.gameObject, 7, 2f);
 				int shown = 0;
-				// 12px minimum here: this strip was the single least readable line of the
-				// window per in-game review — never demote it back to 10px.
+				// 12px minimum here: at 10px this strip is the least readable line of
+				// the window.
 				foreach (ValidationIssue issue in issues)
 				{
 					if (shown++ >= 4)
@@ -1687,9 +1613,8 @@ namespace KRAB.UI
 				}
 			}
 
-			// Close now lives only in the titlebar (in-game request, 2026-07-19) — this
-			// row is just the status line, plus the two session-scoped display toggles
-			// (in-game request, 2026-08-20).
+			// Close lives only in the titlebar; this row is the status line plus the two
+			// session-scoped display toggles.
 			GameObject row = KrabUi.Go("Footer", contentHost);
 			KrabUi.Horizontal(row, 0, 10f);
 			Text status = KrabUi.Label(row.transform, module.GraphStatusText, 12, KrabUi.Muted);
@@ -1708,7 +1633,7 @@ namespace KRAB.UI
 			KrabUi.Tooltip(priorityToggle.gameObject, "#LOC_KRAB_tip_togglePriority");
 		}
 
-		// ------------------------------------------------------------ M3 pickers
+		// --------------------------------------------------------------- pickers
 
 		private void OpenSourcePicker(KrabNode target, int port)
 		{
@@ -1720,10 +1645,8 @@ namespace KRAB.UI
 
 		/// <summary>
 		/// Opens the picker for KrabGraphEdits.InsertableFilters (Remap, Derivative,
-		/// SlewRate, Comparator, Hold) — the only way to add one of these to a group,
-		/// since they're neither a combination operator (not cycleable) nor a source
-		/// (not in the source picker). Added 2026-07-10: without it, the editor could
-		/// author every subtype except these five.
+		/// SlewRate, Comparator, Hold): the only way to add one to a group, since they
+		/// are neither a cycleable combination operator nor a source.
 		/// </summary>
 		private void OpenFilterPicker(KrabNode group)
 		{
@@ -1733,11 +1656,9 @@ namespace KRAB.UI
 		}
 
 		/// <summary>
-		/// Opens the KRILL extended-group number picker (11..KrillGroupBridge.
-		/// MaxVisibleGroup) for a brand-new source — pickerTarget:pickerPort are
-		/// already set by OpenSourcePicker, this only swaps which panel shows.
-		/// Not a scene gesture (unlike Part Field): no part to click, just a list
-		/// of numbers, so no InputLockManager involved.
+		/// Opens the KRILL extended-group number picker for a brand-new source;
+		/// pickerTarget:pickerPort are already set by OpenSourcePicker, this only swaps
+		/// which panel shows. Not a scene gesture, so no InputLockManager involved.
 		/// </summary>
 		private void StartKrillGroupPick()
 		{
@@ -1745,11 +1666,8 @@ namespace KRAB.UI
 			RebuildContent();
 		}
 
-		/// <summary>
-		/// Opens the KRILL axis number picker (1..KrillGroupBridge.MaxVisibleAxis) for
-		/// a brand-new source — same non-scene, no-InputLockManager shape as
-		/// StartKrillGroupPick above.
-		/// </summary>
+		/// <summary>Opens the KRILL axis number picker (5..MaxVisibleAxis) for a brand-new
+		/// source: same non-scene, no-InputLockManager shape as StartKrillGroupPick.</summary>
 		private void StartKrillAxisPick()
 		{
 			pickerKind = PickerKind.KrillAxis;
@@ -1769,10 +1687,9 @@ namespace KRAB.UI
 		}
 
 		/// <summary>
-		/// Starts the same scene part-pick as StartPartPick, but for authoring a brand-new
-		/// Part Field source instead of retargeting an existing output — so pickerTarget:
-		/// pickerPort (already set by OpenSourcePicker) must NOT be overwritten here; they
-		/// still name the consumer the new source will feed once a field is chosen.
+		/// Same scene part-pick as StartPartPick, but for authoring a new Part Field
+		/// source. pickerTarget:pickerPort (set by OpenSourcePicker) must NOT be
+		/// overwritten: they name the consumer the new source will feed.
 		/// </summary>
 		private void StartPartFieldPick()
 		{
@@ -1786,14 +1703,8 @@ namespace KRAB.UI
 
 		/// <summary>
 		/// Suppresses the stock crew-hatch/EVA popup while a scene part-pick is active
-		/// (in flight only — CrewHatchController is a flight-only stock behaviour).
-		/// Reported from a KRILL test session, same picker gesture ported from KRAB:
-		/// CrewHatchController.LateUpdate never consults InputLockManager (only
-		/// EventSystem.IsPointerOverGameObject, the cursor lock, and its own
-		/// interfaceEnabled flag), so the picker's ALLBUTCAMERAS lock doesn't stop it —
-		/// clicking a capsule's hatch during a pick opens the crew/EVA popup on top of
-		/// the picker. Fixed in KRILL with the same public API CameraManager itself
-		/// uses for IVA (DisableInterface/EnableInterface); ported here verbatim.
+		/// (flight only). CrewHatchController.LateUpdate never consults InputLockManager,
+		/// so the picker's ALLBUTCAMERAS lock does not stop the popup on its own.
 		/// </summary>
 		private bool hatchInterfaceDisabledByPicker;
 
@@ -1841,12 +1752,9 @@ namespace KRAB.UI
 			return part;
 		}
 
-		/// <summary>A part's symmetry siblings only (not the part itself — callers add
-		/// that separately, at a different priority tier). Full group, no parent
-		/// filter: matches KRILL's own KrillQuery.GetSymmetryGroup semantics, verified
-		/// reliable and live, never cached (see notes/design-governor-eliche.md §6 for
-		/// why a parent filter was tried and rejected there — it breaks legitimate
-		/// mirror-symmetry cases like left/right landing gear on different parents).</summary>
+		/// <summary>A part's symmetry siblings only, not the part itself: callers add that
+		/// separately, at a different priority tier. Full group with no parent filter,
+		/// which would break mirror symmetry such as left/right gear on different parents.</summary>
 		private static HashSet<Part> SymmetryGroupOf(Part part)
 		{
 			HashSet<Part> result = new HashSet<Part>();
@@ -1884,10 +1792,8 @@ namespace KRAB.UI
 		}
 
 		/// <summary>Every part read by a Part Field reachable from the active output's
-		/// tree — direct binds and their symmetry siblings kept separate, so direct can
-		/// outrank kin within the source family too. Scoped to the active tab on
-		/// purpose (in-game request, 2026-08-20: "quale parte sta alimentando QUESTO
-		/// output" — not every Part Field in the whole graph).</summary>
+		/// tree. Direct binds and their symmetry siblings stay separate so direct can
+		/// outrank kin. Scoped to the active tab, not to the whole graph.</summary>
 		private void CollectSourceGroups(HashSet<Part> direct, HashSet<Part> kin)
 		{
 			int index = FindOutputIndex(activeOutputId);
@@ -1928,14 +1834,9 @@ namespace KRAB.UI
 		}
 
 		/// <summary>
-		/// Recomputes which parts should glow and with what color, then applies only
-		/// the diff (idempotent, called on every RebuildContent — must stay cheap).
-		/// Target family = the active output's bound part + symmetry siblings; Source
-		/// family = every part this output's tree reads from via Part Field + their
-		/// siblings. Default priority is target over source; invertHighlightPriority
-		/// (footer toggle) flips it. Direct always beats a same-family sibling, in
-		/// both priority orders — enforced by applying weakest tier first so a later
-		/// (stronger) tier's dictionary write overwrites it.
+		/// Recomputes which parts glow and in what color, then applies only the diff
+		/// (idempotent, called on every RebuildContent, so it must stay cheap). The
+		/// weakest tier is applied first so a stronger tier's dictionary write wins.
 		/// </summary>
 		private void UpdatePartHighlights()
 		{
@@ -2014,10 +1915,8 @@ namespace KRAB.UI
 		}
 
 		/// <summary>Restores a part's persistent highlight color if it still has one,
-		/// otherwise clears it to default — used when the transient pick-hover moves
-		/// off a part, so it doesn't erase a real target/source highlight underneath
-		/// (same guard KRILL needed porting this exact mechanism, generalized here
-		/// from a single tracked part to a dictionary of them).</summary>
+		/// otherwise clears it to default. Used when the transient pick-hover moves off a
+		/// part, so it doesn't erase a target/source highlight underneath.</summary>
 		private void RestoreOrClearHighlight(Part part)
 		{
 			if (part == null)
@@ -2071,21 +1970,9 @@ namespace KRAB.UI
 		}
 
 		/// <summary>
-		/// Scene picking (the KAL gesture): hover highlight + click to select.
-		///
-		/// Confirms on mouse-UP, not mouse-down (fixed 2026-07-09, in-game feedback:
-		/// clicking with the picker active moved the part in the VAB). The previous
-		/// version removed the input lock the instant GetMouseButtonDown fired — but
-		/// the mouse button is still physically held for the remaining frames of that
-		/// same click, and if the editor's own part-drag re-checks its lock every
-		/// frame (rather than once at gesture start), that window with no active lock
-		/// was enough for it to pick the part up and start following the cursor.
-		/// Verified on the decompiled source that ControlTypes.EDITOR_PAD_PICK_PLACE
-		/// (the flag the editor checks before allowing a part drag) is already
-		/// included in ALLBUTCAMERAS, so this was a timing bug, not a missing flag.
-		/// Diagnostic logging is left in (registry-tracked) in case this only
-		/// partially fixes it: the log shows the exact lock stack and part position
-		/// at the moment of the pick, which the previous static analysis couldn't get.
+		/// Scene picking (the KAL gesture): hover highlight, confirm on mouse-UP.
+		/// Releasing the input lock on mouse-down lets the editor's own part-drag
+		/// grab the part while the button is still physically held.
 		/// </summary>
 		private void HandlePartPicking()
 		{
@@ -2130,8 +2017,7 @@ namespace KRAB.UI
 				hoverPart = hovered;
 				if (hoverPart != null)
 				{
-					// Preview the whole symmetry group, not just the part under the
-					// cursor (in-game request, 2026-08-20 — same behavior as KRILL).
+					// Preview the whole symmetry group, not just the part under the cursor.
 					hoverGroup.Add(hoverPart);
 					hoverGroup.AddRange(SymmetryGroupOf(hoverPart));
 					for (int i = 0; i < hoverGroup.Count; i++)
@@ -2175,13 +2061,9 @@ namespace KRAB.UI
 
 			RectTransform playerGrid = BuildVocabularyFamily(list, "#LOC_KRAB_fam_player", Channels, "#LOC_KRAB_ch_",
 				name => ApplyNewSource("PlayerAxis", "channel", name), "#LOC_KRAB_tip_fam_player");
-			// KRILL's virtual axes (5+ — 1-4 are just stock's own custom axes, already
-			// reachable above as Custom01..04) join the PLAYER AXES family rather than
-			// getting their own header — one inline button right after "Custom Axis 04"
-			// (in-game request, 2026-09-16), same "no room for a whole new family for
-			// one button" reasoning already used for the KRILL Group button below.
-			// Hidden entirely if the installed KRILL doesn't expose GetAxisState yet
-			// (< 0.3.0).
+			// KRILL's virtual axes (5+; 1-4 mirror stock's Custom01..04, already above)
+			// join the PLAYER AXES family as one inline button rather than getting their
+			// own header. Hidden unless the installed KRILL exposes GetAxisState (0.3.0+).
 			if (KrillGroupBridge.AxisInstalled)
 			{
 				Button krillAxisButton = KrabUi.TextButton(playerGrid, Loc("#LOC_KRAB_ui_pickKrillAxis"),
@@ -2195,12 +2077,9 @@ namespace KRAB.UI
 			RectTransform actionGroupGrid = BuildVocabularyFamily(list, "#LOC_KRAB_fam_actionGroup",
 				ActionGroupNames, "#LOC_KRAB_ag_",
 				name => ApplyNewSource("ActionGroupState", "group", name), "#LOC_KRAB_tip_fam_actionGroup");
-			// KRILL's extended groups (11+) join the ACTION GROUP family rather than
-			// getting their own header — a single button, inline with the other 16
-			// (right after "Custom10", in-game request 2026-08-31), not a vocabulary
-			// grid of its own (up to 89 groups would bloat this list; the dedicated
-			// number picker it opens is where that space actually lives). Hidden
-			// entirely if KRILL isn't installed.
+			// KRILL's extended groups (11+) join the ACTION GROUP family as one inline
+			// button, not a grid of their own: up to 89 groups would bloat this list, so
+			// the number picker it opens holds them. Hidden if KRILL isn't installed.
 			if (KrillGroupBridge.Installed)
 			{
 				Button krillGroupButton = KrabUi.TextButton(actionGroupGrid, Loc("#LOC_KRAB_ui_pickKrillGroup"),
@@ -2217,10 +2096,8 @@ namespace KRAB.UI
 			KrabUi.TextButton(partFieldGrid, Loc("#LOC_KRAB_ui_pickPart"), StartPartFieldPick,
 				KrabUi.Panel2, KrabUi.GreenHi, 11, 0f, 22f);
 
-			// Hidden entirely when this controller's own "Show KRAB Input axes" PAW
-			// toggle is off (in-game request, 2026-09-17) — same declutter intent as
-			// the PAW/Axis Groups hiding it also does, extended to this picker so a
-			// controller that never uses the slots doesn't show them here either.
+			// Hidden when this controller's own "Show KRAB Input axes" PAW toggle is off,
+			// matching what that toggle already does to PAW and the Axis Groups screen.
 			if (module.showInputAxes)
 			{
 				Text krabInputHeader = KrabUi.Label(list, Loc("#LOC_KRAB_fam_krabInput"), 11, KrabUi.TanDim);
@@ -2242,10 +2119,9 @@ namespace KRAB.UI
 				() => ApplyNewSource("Constant", "value", "0"),
 				KrabUi.Panel2, KrabUi.Text, 11, 0f, 22f);
 
-			// Turn this leaf into an operator instead of a source — reaches ports that
-			// "+Term/+Group/+Filter" cannot (those only append to a DYNAMIC group; this
-			// works on any port, including a fixed-arity node's own, enabling chains
-			// like Remap→SlewRate or Comparator→Not).
+			// Turn this leaf into an operator instead of a source. Reaches any port,
+			// including a fixed-arity node's own (chains like Remap→SlewRate), unlike
+			// "+Term/+Group/+Filter" which only append to a dynamic group.
 			Text operatorsHeader = KrabUi.Label(list, Loc("#LOC_KRAB_fam_operators"), 11, KrabUi.TanDim);
 			KrabUi.Tooltip(operatorsHeader.gameObject, "#LOC_KRAB_tip_fam_operators");
 			RectTransform opGrid = KrabUi.Grid(list, 138f, 22f);
@@ -2260,9 +2136,8 @@ namespace KRAB.UI
 				KrabUi.Tooltip(filterButton.gameObject, "#LOC_KRAB_tip_node_" + captured);
 			}
 
-			// Same insertion mechanism as the shaping filters above, split into its own
-			// labeled sub-section: pure math functions, no state/params, unlike Remap
-			// and friends (2026-08-22, at user request).
+			// Same insertion mechanism as the shaping filters above, in its own labeled
+			// sub-section: pure math functions, no state or params.
 			Text trigHeader = KrabUi.Label(list, Loc("#LOC_KRAB_fam_trig"), 11, KrabUi.TanDim);
 			KrabUi.Tooltip(trigHeader.gameObject, "#LOC_KRAB_tip_fam_trig");
 			RectTransform trigGrid = KrabUi.Grid(list, 138f, 22f);
@@ -2298,8 +2173,7 @@ namespace KRAB.UI
 		/// <summary>
 		/// Picker for KrabGraphEdits.InsertableFilters and InsertableTrigFunctions,
 		/// opened by "+ Filter" on a group. Selecting one adds it as a new term via
-		/// the generalized AddSubgroup (auto-filling whatever ports it needs), same
-		/// mechanism "+ Group" already used for WeightedSum.
+		/// AddSubgroup, which auto-fills whatever ports it needs.
 		/// </summary>
 		private void BuildFilterPicker()
 		{
@@ -2339,13 +2213,9 @@ namespace KRAB.UI
 		}
 
 		/// <summary>
-		/// Number picker for a KRILL extended group (11..KrillGroupBridge.
-		/// MaxVisibleGroup — mirrors KRILL's own visibility cap live, 2026-08-30).
-		/// Opened by "Pick KRILL group…" in the ACTION GROUP family of the source
-		/// picker. Numbers only for now (no live group-name resolution): that
-		/// needs KrillQuery.GetGroupName plus the ship's part list, more bridge
-		/// surface than an MVP warrants — the group's real name is still visible
-		/// in the KRILL window itself.
+		/// Number picker for a KRILL extended group (11..KrillGroupBridge.MaxVisibleGroup,
+		/// mirroring KRILL's own visibility cap live). Numbers only: resolving group names
+		/// would need KrillQuery.GetGroupName plus the ship's part list.
 		/// </summary>
 		private void BuildKrillGroupPicker()
 		{
@@ -2369,12 +2239,9 @@ namespace KRAB.UI
 		}
 
 		/// <summary>
-		/// Number picker for a KRILL axis (5..KrillGroupBridge.MaxVisibleAxis — mirrors
-		/// KRILL's own visibility cap live). Opened by "Pick KRILL axis…" in the PLAYER
-		/// AXES family of the source picker. Starts at 5, KRILL's own virtual axes: 1-4
-		/// are just stock's own custom axes, already reachable as Custom01..04 right
-		/// above this button (in-game feedback, 2026-09-16 — no reason to offer the
-		/// same four axes twice under two different names).
+		/// Number picker for a KRILL axis (5..KrillGroupBridge.MaxVisibleAxis, mirroring
+		/// KRILL's own visibility cap live). Starts at 5 because axes 1-4 are stock's own
+		/// custom axes, already offered as Custom01..04 in the PLAYER AXES family.
 		/// </summary>
 		private void BuildKrillAxisPicker()
 		{
@@ -2397,10 +2264,8 @@ namespace KRAB.UI
 			KrabUi.Size(cancel.gameObject, 90f, 24f);
 		}
 
-		/// <summary>Returns the family's grid so a caller can append extra buttons
-		/// inline with the vocabulary entries (KRILL's group picker button does
-		/// this on the ACTION GROUP family, 2026-08-31) — every other caller just
-		/// ignores the return value.</summary>
+		/// <summary>Returns the family's grid so a caller can append extra buttons inline
+		/// with the vocabulary entries; most callers ignore the return value.</summary>
 		private RectTransform BuildVocabularyFamily(RectTransform list, string familyKey, string[] entries,
 			string entryKeyPrefix, System.Action<string> onPick, string tipKey = null)
 		{
@@ -2432,10 +2297,9 @@ namespace KRAB.UI
 		}
 
 		/// <summary>
-		/// Turns the leaf under this picker into an operator instead of a source —
-		/// the "OPERATORS" family of the same picker screen. Reaches fixed-arity nodes'
-		/// own ports (e.g. nesting a Remap inside a SlewRate), which "+Filter" alone
-		/// cannot: that button only appends a new term to a dynamic group.
+		/// Turns the leaf under this picker into an operator instead of a source.
+		/// Reaches fixed-arity nodes' own ports (e.g. nesting a Remap inside a SlewRate),
+		/// which "+Filter" cannot: it only appends a new term to a dynamic group.
 		/// </summary>
 		private void ApplyNewOperator(string subtype)
 		{
@@ -2537,10 +2401,8 @@ namespace KRAB.UI
 
 		/// <summary>
 		/// Field list for a new Part Field source (BuildTargetFieldPicker's third branch):
-		/// KRAB_DERIVED_FIELD catalog entries applicable to each module, then that
-		/// module's own readable KSPFields (float/double/int/bool), skipping any a
-		/// catalog entry declares replaced (DerivedFieldsCatalog.IsReplaced — see
-		/// notes/design-governor-eliche.md §8.1). Picking either creates the source.
+		/// KRAB_DERIVED_FIELD catalog entries applicable to each module, then that module's
+		/// own readable KSPFields (float/double/int/bool) minus any IsReplaced declares.
 		/// </summary>
 		private void BuildPartFieldPicker()
 		{
@@ -2713,11 +2575,8 @@ namespace KRAB.UI
 			else if (node.IsKnown && node.Info.name == "AxisOutput" && TryResolveAxisField(node, out BaseAxisField field, out _))
 			{
 				// Show the bound field's own units (e.g. a hinge's degrees), not the
-				// internal 0..1 span — "0.25" reads as a fraction, not as "45°" of a
-				// 180° hinge (in-game feedback, 2026-07-09).
-				// Same range AxisOutputRuntime.ResolveTarget actually writes into
-				// (softLimits when the module declares them, else the field's own
-				// min/max) — otherwise the preview's clamp wouldn't match reality.
+				// internal 0..1 span. Uses the same range AxisOutputRuntime.ResolveTarget
+				// writes into: softLimits when the module declares them, else min/max.
 				float targetMin = field.minValue;
 				float targetMax = field.maxValue;
 				if (field.module is IAxisFieldLimits limits && limits.HasAxisFieldLimit(node.GetString("axisName", "")))
@@ -2735,10 +2594,8 @@ namespace KRAB.UI
 					binding.offset = targetMin - inMin * binding.factor;
 				}
 				// Clamp the preview to the same range the actual write clamps to
-				// (Mathf.InverseLerp already clamps t to 0..1 there) — an upstream
-				// operator feeding a raw unbounded value (no Remap) used to show
-				// nonsense like "442°" on a 0-180° hinge; nothing wrong ever happened
-				// in flight, only the preview lied about it.
+				// (Mathf.InverseLerp already clamps t to 0..1), so an unbounded upstream
+				// value can't read as e.g. "442°" on a 0-180° hinge.
 				binding.hasClamp = true;
 				binding.clampMin = Mathf.Min(targetMin, targetMax);
 				binding.clampMax = Mathf.Max(targetMin, targetMax);
@@ -2749,11 +2606,9 @@ namespace KRAB.UI
 		}
 
 		/// <summary>
-		/// Unit choice as a small segmented control (one button per option, current one
-		/// highlighted) rather than a single cycle-on-click chip: with only 2-3 options
-		/// per metric, picking directly beats cycling blindly through them (in-game
-		/// feedback, 2026-07-09 — closest thing to the requested dropdown without the
-		/// native Dropdown component's prefab/template plumbing).
+		/// Unit choice as a small segmented control, one button per option with the
+		/// current one highlighted: with 2-3 options per metric, picking directly beats
+		/// cycling, and UGUI's Dropdown would need prefab/template plumbing.
 		/// </summary>
 		private void BuildUnitChip(Transform parent, KrabNode node)
 		{
@@ -2778,8 +2633,8 @@ namespace KRAB.UI
 			{
 				string symbol = option.symbol;
 				bool active = symbol == current;
-				// Display-only preference: bypasses Mutate on purpose (no undo snapshot,
-				// no recompile — the canonical value never changes). Backup still
+				// Display-only preference: bypasses Mutate (no undo snapshot, no
+				// recompile, the canonical value never changes). The backup is still
 				// refreshed so the choice survives Unity cloning and saves.
 				KrabUi.TextButton(seg.transform, symbol, () =>
 				{
