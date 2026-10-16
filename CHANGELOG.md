@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.2]
+
+### Fixed
+
+- **Bound parts were lost after restarting the game**: a craft loaded or launched in a new session could come back with every Axis Output, Action Trigger and Part Field target showing as missing. Targets now survive restarts, like a KAL-1000's do.
+
 ## [0.5.1]
 
 ### Added
