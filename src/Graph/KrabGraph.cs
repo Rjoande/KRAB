@@ -39,6 +39,56 @@ namespace KRAB.Graph
 			return "n" + nextNodeId++;
 		}
 
+		/// <summary>
+		/// Rewrite the part persistentId carried by target/source nodes (AxisOutput,
+		/// ActionTrigger, PartField). KSP reassigns a part id that collides with one
+		/// already in the save when a craft is loaded or launched; the map returns the
+		/// new id, or the same id when unchanged. Returns how many nodes were rewritten.
+		/// </summary>
+		public int RemapPartIds(System.Func<uint, uint> map)
+		{
+			int count = 0;
+			for (int i = 0; i < Nodes.Count; i++)
+			{
+				if (RemapPartId(Nodes[i].Retained, map))
+				{
+					count++;
+				}
+			}
+			return count;
+		}
+
+		/// <summary>Same as the instance method, on a raw KRAB_GRAPH node (parse-failed fallback).</summary>
+		public static int RemapPartIds(ConfigNode graphNode, System.Func<uint, uint> map)
+		{
+			int count = 0;
+			ConfigNode[] nodes = graphNode.GetNodes("NODE");
+			for (int i = 0; i < nodes.Length; i++)
+			{
+				if (RemapPartId(nodes[i], map))
+				{
+					count++;
+				}
+			}
+			return count;
+		}
+
+		private static bool RemapPartId(ConfigNode node, System.Func<uint, uint> map)
+		{
+			if (node == null || !node.HasValue("persistentId")
+				|| !uint.TryParse(node.GetValue("persistentId"), out uint oldId) || oldId == 0)
+			{
+				return false;
+			}
+			uint newId = map(oldId);
+			if (newId == oldId || newId == 0)
+			{
+				return false;
+			}
+			node.SetValue("persistentId", newId.ToString(), true);
+			return true;
+		}
+
 		// Mutation primitives (editor UI). They keep the id index coherent; callers
 		// compose them in KrabGraphEdits and must end with the module's
 		// NotifyGraphEdited (backup refresh + revalidation + recompilation).

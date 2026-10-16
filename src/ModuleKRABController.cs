@@ -13,7 +13,7 @@ namespace KRAB
 	/// vessel physics) through a node graph and drives target axis fields the way a
 	/// KAL-1000 does, through RoboticControllerManager (see RoboticManagerBridge).
 	/// </summary>
-	public class ModuleKRABController : PartModule
+	public class ModuleKRABController : PartModule, IShipConstructIDChanges
 	{
 		public const int InputSlotCount = 4;
 
@@ -260,12 +260,70 @@ namespace KRAB
 			if (HighLogic.LoadedSceneIsFlight)
 			{
 				GameEvents.onVesselWasModified.Add(OnVesselModified);
+				GameEvents.onPartPersistentIdChanged.Add(OnPartPersistentIdChanged);
 			}
 		}
 
 		private void OnDestroy()
 		{
 			GameEvents.onVesselWasModified.Remove(OnVesselModified);
+			GameEvents.onPartPersistentIdChanged.Remove(OnPartPersistentIdChanged);
+		}
+
+		// Part ids are not stable across a craft's life: ShipConstruct.LoadShip (VAB
+		// load and launch alike) reassigns any persistentId that collides with a part
+		// of the save, and a loaded Part can be renumbered in flight. KAL tracks both
+		// paths the same way; without them every bound target silently goes stale.
+
+		void IShipConstructIDChanges.UpdatePersistentIDs(Dictionary<uint, uint> changedIDs)
+		{
+			if (changedIDs == null || changedIDs.Count == 0)
+			{
+				return;
+			}
+			RemapPartIds(id => changedIDs.TryGetValue(id, out uint renumbered) ? renumbered : id, "craft load");
+		}
+
+		private void OnPartPersistentIdChanged(uint vesselId, uint oldId, uint newId)
+		{
+			RemapPartIds(id => id == oldId ? newId : id, "flight");
+		}
+
+		private void RemapPartIds(System.Func<uint, uint> map, string reason)
+		{
+			RestoreGraphFromBackup();
+			int count;
+			if (Graph != null)
+			{
+				count = Graph.RemapPartIds(map);
+			}
+			else if (graphNode != null)
+			{
+				count = KrabGraph.RemapPartIds(graphNode, map);
+			}
+			else
+			{
+				return;
+			}
+			if (count == 0)
+			{
+				return;
+			}
+			if (Graph != null)
+			{
+				RefreshGraphPersistence();
+			}
+			else
+			{
+				graphBackup = graphNode.ToString();
+			}
+			Debug.LogFormat("[KRAB] {0}: remapped {1} part id(s) after {2}",
+				part != null && part.partInfo != null ? part.partInfo.name : "?", count, reason);
+			if (evaluator != null)
+			{
+				// Before OnStart there is nothing to rebind yet: OnStart compiles anyway.
+				CompileAndResolve();
+			}
 		}
 
 		private void OnVesselModified(Vessel modified)
