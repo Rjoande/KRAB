@@ -31,7 +31,9 @@ Where the KAL-1000 plays back a hand-authored sequence, the KRAB-9000 *listens* 
 
 ## Installation
 
-Copy the contents of this repository into your `GameData` folder, so you end up with `GameData/KRAB/...`. Make sure Breaking Ground, Harmony, and ModuleManager are installed alongside it.
+Via CKAN: install **KRAB-9000** and the dependencies come along.
+
+Manually: download the latest release zip and copy its `GameData/KRAB` folder into your `GameData`, so you end up with `GameData/KRAB/...`. Make sure Breaking Ground, Harmony, and ModuleManager are installed alongside it.
 
 ## Known limitations
 

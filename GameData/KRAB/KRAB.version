@@ -1,0 +1,30 @@
+{
+    "NAME": "KRAB-9000",
+    "URL": "https://raw.githubusercontent.com/Rjoande/KRAB/main/GameData/KRAB/KRAB.version",
+    "DOWNLOAD": "https://github.com/Rjoande/KRAB/releases/latest",
+    "GITHUB": {
+        "USERNAME": "Rjoande",
+        "REPOSITORY": "KRAB",
+        "ALLOW_PRE_RELEASE": false
+    },
+    "VERSION": {
+        "MAJOR": 0,
+        "MINOR": 5,
+        "PATCH": 2
+    },
+    "KSP_VERSION": {
+        "MAJOR": 1,
+        "MINOR": 12,
+        "PATCH": 5
+    },
+    "KSP_VERSION_MIN": {
+        "MAJOR": 1,
+        "MINOR": 12,
+        "PATCH": 0
+    },
+    "KSP_VERSION_MAX": {
+        "MAJOR": 1,
+        "MINOR": 12,
+        "PATCH": 99
+    }
+}
