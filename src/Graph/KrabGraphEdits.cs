@@ -194,6 +194,17 @@ namespace KRAB.Graph
 			CompactWeights(group, port);
 		}
 
+		/// <summary>
+		/// Remove the term at a fixed-arity port (an output's root, a Remap's input...):
+		/// unlink and prune like RemoveTerm, but the port cannot close, so it falls back
+		/// to an explicit DEFAULT 0 to keep validation from flagging it unconnected.
+		/// </summary>
+		public static void ClearTerm(KrabGraph graph, KrabNode target, int port)
+		{
+			ClearPort(graph, target, port);
+			graph.SetDefault(target.id, port, 0f);
+		}
+
 		/// <summary>Recursively remove a node (and its exclusive feeders) once nothing consumes it.</summary>
 		private static void PruneIfOrphan(KrabGraph graph, KrabNode node)
 		{

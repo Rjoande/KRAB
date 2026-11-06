@@ -17,11 +17,13 @@ namespace KRAB.UI
 	public class KrabEditorWindow : MonoBehaviour
 	{
 		private const float WindowWidth = 620f;
-		// Fixed heights for the two variable-length lists (tree, simulator sliders):
-		// they scroll internally so the window's total height stays constant
-		// whatever the graph size, keeping the titlebar from drifting.
-		private const float TreeAreaHeight = 260f;
+		// The variable-length lists (tree, pickers, simulator sliders) scroll inside a
+		// set height, so the window's size doesn't follow the graph size. The tree and
+		// picker height is user-resizable from the bottom grip; the simulator's is fixed.
+		private const float DefaultTreeAreaHeight = 260f;
+		private const float MinTreeAreaHeight = 140f;
 		private const float SimAreaHeight = 130f;
+		private const float ResizeGripHeight = 6f;
 		private const float RefreshInterval = 0.1f;
 		private const int MaxTreeDepth = 8;
 		private const int MaxUndo = 50;
@@ -43,7 +45,14 @@ namespace KRAB.UI
 		// reopening lands where the window was left. Session-scoped, not persisted.
 		private static Vector2? lastWindowPosition;
 
+		// Height of the tree area and of every picker list, set by the bottom grip.
+		// Session-scoped like lastWindowPosition.
+		private static float treeAreaHeight = DefaultTreeAreaHeight;
+
 		private ModuleKRABController module;
+		// Layout of the list currently sized by treeAreaHeight, resized live during a
+		// grip drag without rebuilding the content.
+		private LayoutElement resizableList;
 		private RectTransform windowRect;
 		private Transform contentHost;
 		private Button undoButton;
@@ -484,7 +493,48 @@ namespace KRAB.UI
 			contentHost = KrabUi.Go("Content", windowRect).transform;
 			KrabUi.Vertical(contentHost.gameObject, 10, 9f);
 
+			// Last child of the window: RebuildContent only replaces contentHost's
+			// children, so the grip stays at the bottom edge.
+			GameObject grip = KrabUi.Go("ResizeGrip", windowRect);
+			grip.AddComponent<Image>().color = KrabUi.Line;
+			KrabUi.Size(grip, -1f, ResizeGripHeight);
+			grip.AddComponent<ResizeHandler>().owner = this;
+
 			RebuildContent();
+		}
+
+		/// <summary>A scroll list sized by the user-resizable tree height.</summary>
+		private RectTransform ResizableList(Transform parent)
+		{
+			RectTransform content = KrabUi.ScrollList(parent, treeAreaHeight);
+			// ScrollList returns Content, under Viewport, under the sized outer frame.
+			resizableList = content.parent.parent.GetComponent<LayoutElement>();
+			return content;
+		}
+
+		/// <summary>
+		/// Resizes the current list in place; the window's ContentSizeFitter grows it
+		/// downward from its top-anchored pivot. The cap keeps the bottom edge on screen.
+		/// </summary>
+		private void SetTreeAreaHeight(float height, float maxHeight)
+		{
+			treeAreaHeight = Mathf.Clamp(height, MinTreeAreaHeight, Mathf.Max(MinTreeAreaHeight, maxHeight));
+			if (resizableList != null)
+			{
+				resizableList.preferredHeight = treeAreaHeight;
+			}
+		}
+
+		/// <summary>Largest list height that keeps the window's bottom edge on screen.</summary>
+		private float MaxTreeAreaHeight()
+		{
+			RectTransform canvasRect = (RectTransform)windowRect.parent;
+			// Window anchored at the canvas centre with a top pivot: its top edge sits
+			// anchoredPosition.y above the centre, so this is the room below that edge.
+			float roomBelowTop = windowRect.anchoredPosition.y + canvasRect.rect.height * 0.5f;
+			float listHeight = resizableList != null ? resizableList.preferredHeight : treeAreaHeight;
+			float otherContent = windowRect.rect.height - listHeight;
+			return roomBelowTop - otherContent - 8f;
 		}
 
 		private void BuildTitlebar()
@@ -535,6 +585,7 @@ namespace KRAB.UI
 				Destroy(child.gameObject);
 			}
 			valueBindings.Clear();
+			resizableList = null;
 
 			if (undoButton != null)
 			{
@@ -778,12 +829,12 @@ namespace KRAB.UI
 			KrabNode output = outputNodes[index];
 			BuildTargetCard(output);
 
-			RectTransform treePanel = KrabUi.ScrollList(contentHost, TreeAreaHeight);
+			RectTransform treePanel = ResizableList(contentHost);
 			KrabNode rootUpstream = UpstreamAt(output, 0);
 			if (rootUpstream != null)
 			{
 				// The output is the root's parent: enables the source picker on a bare
-				// root source (its fixed 1-port arity already suppresses the ✕ button).
+				// root source, and ✕ on the root clears the output's fixed port.
 				BuildTreeRow(treePanel, rootUpstream, 0, output, 0);
 			}
 			else
@@ -838,9 +889,18 @@ namespace KRAB.UI
 			GameObject targetRow = KrabUi.Go("TargetRow", left.transform);
 			KrabUi.Horizontal(targetRow, 0, 8f);
 			KrabUi.Size(targetRow, -1f, 22f);
-			string targetText = DescribeTarget(output, out Color targetColor);
+			string targetText = DescribeTarget(output, out Color targetColor,
+				out string targetPrefix, out string targetPart, out string targetField);
 			Text targetLabel = KrabUi.Label(targetRow.transform, targetText, 13, targetColor);
-			KrabUi.Size(targetLabel.gameObject, -1f, 22f);
+			// The label takes the leftover width (its text never drives the layout) and
+			// FitLabel ellipsizes the text to it; clipping to one line is the last resort.
+			targetLabel.horizontalOverflow = HorizontalWrapMode.Wrap;
+			targetLabel.verticalOverflow = VerticalWrapMode.Truncate;
+			LayoutElement targetLayout = KrabUi.Size(targetLabel.gameObject, 0f, 22f, 1f);
+			targetLayout.minWidth = 0f;
+			FitLabel fit = targetLabel.gameObject.AddComponent<FitLabel>();
+			fit.Init(targetLabel, targetPrefix, targetPart, targetField);
+			KrabUi.Tooltip(targetLabel.gameObject, targetText);
 			KrabUi.TextButton(targetRow.transform, Loc("#LOC_KRAB_ui_pickPart"),
 				() => StartPartPick(output), KrabUi.Panel, KrabUi.GreenHi, 11, 0f, 20f);
 
@@ -918,9 +978,14 @@ namespace KRAB.UI
 		/// Target description plus a state color: normal (bound), muted (never bound),
 		/// or danger (the bound part no longer exists on this craft). The binding is
 		/// flagged, never auto-cleared: a part can come back via undo or re-attach.
+		/// The full text is returned uncut; prefix/partTitle/detail are its pieces for
+		/// FitLabel (partTitle null when there is no part/field pair to show).
 		/// </summary>
-		private string DescribeTarget(KrabNode output, out Color color)
+		private string DescribeTarget(KrabNode output, out Color color,
+			out string prefix, out string partTitle, out string detail)
 		{
+			partTitle = null;
+			detail = null;
 			string field = output.Info.name == "AxisOutput"
 				? output.GetString("axisName", "")
 				: output.GetString("actionName", "");
@@ -929,32 +994,33 @@ namespace KRAB.UI
 			if (!bound)
 			{
 				color = KrabUi.Muted;
-				return NodeName(output) + " · " + Loc("#LOC_KRAB_ui_notBound");
+				prefix = NodeName(output) + " · " + Loc("#LOC_KRAB_ui_notBound");
+				return prefix;
 			}
 			uint.TryParse(persistentIdText, out uint persistentId);
 			if (!TryFindPart(persistentId, out Part part))
 			{
 				color = KrabUi.Danger;
-				return NodeName(output) + " · " + Loc("#LOC_KRAB_ui_targetMissing");
+				prefix = NodeName(output) + " · " + Loc("#LOC_KRAB_ui_targetMissing");
+				return prefix;
 			}
 			color = KrabUi.Text;
-			return NodeName(output) + " → " + ResolveTargetLabel(output, part, field);
+			prefix = NodeName(output) + " → ";
+			detail = ResolveTargetDetail(output, field, out bool resolved);
+			if (resolved)
+			{
+				partTitle = part.partInfo.title;
+				return prefix + partTitle + FitLabel.Separator + detail;
+			}
+			return prefix + detail;
 		}
 
-		private const int TargetLabelMaxChars = 15;
 		private const int PartFieldLabelMaxChars = 35;
 		// Simulator row label column is fixed-width and sits next to the slider, so an
 		// overlong label runs into it. 35 matches that column's width; the -3 margin
 		// makes room for the "[nX]" suffix when node ids are shown.
 		private const int SimulatorLabelMaxChars = 35;
 		private const int SimulatorLabelIdMargin = 3;
-
-		/// <summary>Default cap, sized so a long part/field name can't stretch the target
-		/// card past its layout.</summary>
-		private static string Truncate(string text)
-		{
-			return Truncate(text, TargetLabelMaxChars);
-		}
 
 		/// <summary>Caps a string to maxChars total, ellipsizing the tail.</summary>
 		private static string Truncate(string text, int maxChars)
@@ -966,26 +1032,25 @@ namespace KRAB.UI
 			return text.Substring(0, maxChars - 1) + "…";
 		}
 
-		/// <summary>Prefers "Part title - Field/action GUI name", falling back to the raw
-		/// persisted name when the live field/action can't be resolved (e.g. an unloaded
-		/// module). Both halves truncate independently so neither hides the other.</summary>
-		private static string ResolveTargetLabel(KrabNode output, Part part, string rawField)
+		/// <summary>The live field/action GUI name, or the raw persisted name (resolved =
+		/// false) when it can't be resolved, e.g. an unloaded module.</summary>
+		private static string ResolveTargetDetail(KrabNode output, string rawField, out bool resolved)
 		{
-			string partName = Truncate(part.partInfo.title);
+			resolved = true;
 			if (output.Info.name == "AxisOutput")
 			{
 				if (TryResolveAxisField(output, out BaseAxisField axisField, out _))
 				{
-					string guiName = string.IsNullOrEmpty(axisField.guiName)
+					return string.IsNullOrEmpty(axisField.guiName)
 						? axisField.name
 						: Localizer.Format(axisField.guiName);
-					return partName + " - " + Truncate(guiName);
 				}
 			}
 			else if (TryResolveAction(output, out BaseAction action, out _))
 			{
-				return partName + " - " + Truncate(Localizer.Format(action.guiName));
+				return Localizer.Format(action.guiName);
 			}
+			resolved = false;
 			return rawField;
 		}
 
@@ -1216,17 +1281,29 @@ namespace KRAB.UI
 			KrabUi.Size(value.gameObject, 74f, 21f);
 			AddValueBinding(node, value);
 
-			// Removable: direct child of a dynamic group (fixed-arity ports would go
-			// invalid). The 18px slot is reserved either way, or the value column shifts
-			// left on rows without a button and loses its vertical alignment.
-			if (parentGroup != null && parentGroup.IsKnown && parentGroup.Info.HasDynamicInputs)
+			// Every row is removable: a dynamic group's term closes its port, a fixed
+			// port (output root, Remap input...) falls back to a DEFAULT 0. The 18px slot
+			// is reserved either way, or the value column loses its vertical alignment.
+			if (parentGroup != null && parentGroup.IsKnown)
 			{
 				int capturedPort = port;
 				KrabNode capturedGroup = parentGroup;
+				bool dynamic = parentGroup.Info.HasDynamicInputs;
 				Button removeTermButton = KrabUi.IconButton(row.transform, "✕",
-					() => Mutate(() => KrabGraphEdits.RemoveTerm(Graph, capturedGroup, capturedPort)),
+					() => Mutate(() =>
+					{
+						if (dynamic)
+						{
+							KrabGraphEdits.RemoveTerm(Graph, capturedGroup, capturedPort);
+						}
+						else
+						{
+							KrabGraphEdits.ClearTerm(Graph, capturedGroup, capturedPort);
+						}
+					}),
 					KrabUi.Danger, 18f);
-				KrabUi.Tooltip(removeTermButton.gameObject, "#LOC_KRAB_tip_removeTerm");
+				KrabUi.Tooltip(removeTermButton.gameObject,
+					dynamic ? "#LOC_KRAB_tip_removeTerm" : "#LOC_KRAB_tip_clearTerm");
 			}
 			else
 			{
@@ -1292,6 +1369,17 @@ namespace KRAB.UI
 				Mutate(() => Graph.SetDefault(nodeId, capturedPort,
 					float.Parse(sanitized, CultureInfo.InvariantCulture)));
 			});
+			// A fixed port emptied by ✕ needs a way back to a source or operator; an
+			// output's root already has its "start building" button.
+			if (node.IsKnown && node.Info.kind != NodeKind.Output)
+			{
+				KrabNode capturedNode = node;
+				Button pick = KrabUi.TextButton(row.transform, "▾",
+					() => OpenSourcePicker(capturedNode, capturedPort),
+					KrabUi.Inset, KrabUi.TanDim, 12, 22f, 20f);
+				KrabUi.Size(pick.gameObject, 22f, 20f);
+				KrabUi.Tooltip(pick.gameObject, "#LOC_KRAB_tip_pickForPort");
+			}
 		}
 
 		// ---------------------------------------------------------- param editing
@@ -2057,7 +2145,7 @@ namespace KRAB.UI
 			RectTransform panel = KrabUi.Bordered("SourcePicker", contentHost, KrabUi.Panel, KrabUi.Line);
 			KrabUi.Vertical(panel.gameObject, 9, 6f);
 			KrabUi.Label(panel, Loc("#LOC_KRAB_ui_pickSource"), 10, KrabUi.TanDim);
-			RectTransform list = KrabUi.ScrollList(panel, 300f);
+			RectTransform list = ResizableList(panel);
 
 			RectTransform playerGrid = BuildVocabularyFamily(list, "#LOC_KRAB_fam_player", Channels, "#LOC_KRAB_ch_",
 				name => ApplyNewSource("PlayerAxis", "channel", name), "#LOC_KRAB_tip_fam_player");
@@ -2180,7 +2268,7 @@ namespace KRAB.UI
 			RectTransform panel = KrabUi.Bordered("FilterPicker", contentHost, KrabUi.Panel, KrabUi.Line);
 			KrabUi.Vertical(panel.gameObject, 9, 6f);
 			KrabUi.Label(panel, Loc("#LOC_KRAB_ui_pickFilter"), 10, KrabUi.TanDim);
-			RectTransform list = KrabUi.ScrollList(panel, 160f);
+			RectTransform list = ResizableList(panel);
 
 			KrabNode target = pickerTarget;
 			foreach (string subtype in KrabGraphEdits.InsertableFilters)
@@ -2222,7 +2310,7 @@ namespace KRAB.UI
 			RectTransform panel = KrabUi.Bordered("KrillGroupPicker", contentHost, KrabUi.Panel, KrabUi.Line);
 			KrabUi.Vertical(panel.gameObject, 9, 6f);
 			KrabUi.Label(panel, Loc("#LOC_KRAB_ui_pickKrillGroupHeader"), 10, KrabUi.TanDim);
-			RectTransform list = KrabUi.ScrollList(panel, 160f);
+			RectTransform list = ResizableList(panel);
 
 			RectTransform grid = KrabUi.Grid(list, 60f, 22f);
 			int cap = KrillGroupBridge.MaxVisibleGroup;
@@ -2248,7 +2336,7 @@ namespace KRAB.UI
 			RectTransform panel = KrabUi.Bordered("KrillAxisPicker", contentHost, KrabUi.Panel, KrabUi.Line);
 			KrabUi.Vertical(panel.gameObject, 9, 6f);
 			KrabUi.Label(panel, Loc("#LOC_KRAB_ui_pickKrillAxisHeader"), 10, KrabUi.TanDim);
-			RectTransform list = KrabUi.ScrollList(panel, 160f);
+			RectTransform list = ResizableList(panel);
 
 			RectTransform grid = KrabUi.Grid(list, 60f, 22f);
 			int cap = KrillGroupBridge.MaxVisibleAxis;
@@ -2335,7 +2423,7 @@ namespace KRAB.UI
 			KrabUi.Label(panel,
 				Localizer.Format(axis ? "#LOC_KRAB_ui_pickAxisOn" : "#LOC_KRAB_ui_pickActionOn", pickedPart.partInfo.title),
 				10, KrabUi.TanDim);
-			RectTransform list = KrabUi.ScrollList(panel, 280f);
+			RectTransform list = ResizableList(panel);
 
 			int found = 0;
 			if (axis)
@@ -2411,7 +2499,7 @@ namespace KRAB.UI
 			KrabUi.Label(panel,
 				Localizer.Format("#LOC_KRAB_ui_pickFieldOn", pickedPart.partInfo.title),
 				10, KrabUi.TanDim);
-			RectTransform list = KrabUi.ScrollList(panel, 280f);
+			RectTransform list = ResizableList(panel);
 
 			int found = 0;
 			for (int m = 0; m < pickedPart.Modules.Count; m++)
@@ -2665,6 +2753,135 @@ namespace KRAB.UI
 					(RectTransform)target.parent, eventData.position, eventData.pressEventCamera, out Vector2 point))
 				{
 					target.anchoredPosition = point + offset;
+				}
+			}
+		}
+
+		/// <summary>
+		/// Ellipsizes a one-line label to its actual width: the part title shortens
+		/// first (down to MinPartChars), then the field name, then the whole tail.
+		/// Refits only when the width changes, so the cost is paid once per layout.
+		/// </summary>
+		private class FitLabel : MonoBehaviour
+		{
+			public const string Separator = " - ";
+			private const int MinPartChars = 50;
+
+			private Text label;
+			private string prefix;
+			private string part;
+			private string detail;
+			private float lastWidth = -1f;
+			private readonly TextGenerator generator = new TextGenerator();
+			private TextGenerationSettings settings;
+
+			public void Init(Text target, string prefixText, string partTitle, string detailText)
+			{
+				label = target;
+				prefix = prefixText ?? "";
+				part = partTitle;
+				detail = detailText;
+			}
+
+			private void LateUpdate()
+			{
+				float width = label.rectTransform.rect.width;
+				if (width <= 0f || Mathf.Approximately(width, lastWidth))
+				{
+					return;
+				}
+				lastWidth = width;
+				settings = label.GetGenerationSettings(Vector2.zero);
+				settings.horizontalOverflow = HorizontalWrapMode.Overflow;
+				label.text = Fit(width);
+			}
+
+			private string Fit(float width)
+			{
+				int detailLength = detail != null ? detail.Length : 0;
+				string full = Compose(part != null ? part.Length : 0, detailLength);
+				if (Fits(full, width))
+				{
+					return full;
+				}
+				if (part != null)
+				{
+					for (int p = part.Length - 1; p >= MinPartChars; p--)
+					{
+						string candidate = Compose(p, detailLength);
+						if (Fits(candidate, width))
+						{
+							return candidate;
+						}
+					}
+					int partLength = Mathf.Min(part.Length, MinPartChars);
+					for (int d = detailLength - 1; d >= 2; d--)
+					{
+						string candidate = Compose(partLength, d);
+						if (Fits(candidate, width))
+						{
+							return candidate;
+						}
+					}
+				}
+				for (int n = full.Length - 1; n >= 2; n--)
+				{
+					string candidate = Truncate(full, n);
+					if (Fits(candidate, width))
+					{
+						return candidate;
+					}
+				}
+				return "…";
+			}
+
+			private string Compose(int partLength, int detailLength)
+			{
+				string text = prefix;
+				if (part != null)
+				{
+					text += Truncate(part, partLength) + Separator;
+				}
+				if (detail != null)
+				{
+					text += Truncate(detail, detailLength);
+				}
+				return text;
+			}
+
+			private bool Fits(string text, float width)
+			{
+				// 1px slack: a text measured as an exact fit could still wrap off the line.
+				return generator.GetPreferredWidth(text, settings) / label.pixelsPerUnit <= width - 1f;
+			}
+		}
+
+		/// <summary>Bottom-edge grip: vertical drag changes the tree/picker list height.</summary>
+		private class ResizeHandler : MonoBehaviour, IBeginDragHandler, IDragHandler
+		{
+			public KrabEditorWindow owner;
+			private float startPointerY;
+			private float startHeight;
+			private float maxHeight;
+
+			public void OnBeginDrag(PointerEventData eventData)
+			{
+				RectTransform canvasRect = (RectTransform)owner.windowRect.parent;
+				RectTransformUtility.ScreenPointToLocalPointInRectangle(
+					canvasRect, eventData.position, eventData.pressEventCamera, out Vector2 point);
+				startPointerY = point.y;
+				startHeight = treeAreaHeight;
+				maxHeight = owner.MaxTreeAreaHeight();
+			}
+
+			public void OnDrag(PointerEventData eventData)
+			{
+				RectTransform canvasRect = (RectTransform)owner.windowRect.parent;
+				if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+					canvasRect, eventData.position, eventData.pressEventCamera, out Vector2 point))
+				{
+					// Dragging down (pointer y decreasing) makes the list taller.
+					owner.SetTreeAreaHeight(startHeight + (startPointerY - point.y), maxHeight);
 				}
 			}
 		}
