@@ -14,7 +14,7 @@ Where the KAL-1000 plays back a hand-authored sequence, the KRAB-9000 *listens* 
 - **Filters**: Remap (linear, or with a dedicated point-and-drag response curve editor), Derivative, Integrator (with a resettable accumulator and the same optional clamp, for building PI/PID regulators directly in the graph), Rate Limit (slew), Comparator with hysteresis, Hold (sample-and-track or latch), and the trigonometric functions (Sin/Cos/Tan/Asin/Acos/Atan/Atan2).
 - **Outputs**: drive any part's axis field directly (servo angle, RCS thrust percentage, reaction wheel authority, ...) or fire a part action on a signal edge.
 - **Axis promotion**: RCS thrust percentage and reaction wheel authority limiter become assignable Axis Group fields, just like a KAL's own targets — so KRAB (and KAL) can drive them directly.
-- **A dedicated editor window**, built entirely in code (no external UI assets): tree view with live per-node telemetry, undo/redo, a VAB/SPH condition simulator (drive the graph with sliders before you ever launch), copy/paste of a whole input combination between outputs, hover tooltips, and English/Italian localization.
+- **A dedicated editor window**, built entirely in code (no external UI assets): tree view with live per-node telemetry, a vertically resizable layout, undo/redo, a VAB/SPH condition simulator (drive the graph with sliders before you ever launch), copy/paste of a whole input combination between outputs, hover tooltips, and English/Italian localization.
 
 ## Requirements
 

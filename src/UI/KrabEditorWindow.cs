@@ -889,6 +889,11 @@ namespace KRAB.UI
 			GameObject targetRow = KrabUi.Go("TargetRow", left.transform);
 			KrabUi.Horizontal(targetRow, 0, 8f);
 			KrabUi.Size(targetRow, -1f, 22f);
+			// Button first, so it stays put whatever the label length; once a target
+			// is bound it shrinks to "Change".
+			KrabUi.TextButton(targetRow.transform,
+				Loc(IsTargetBound(output) ? "#LOC_KRAB_ui_changeTarget" : "#LOC_KRAB_ui_pickPart"),
+				() => StartPartPick(output), KrabUi.Panel, KrabUi.GreenHi, 11, 0f, 20f);
 			string targetText = DescribeTarget(output, out Color targetColor,
 				out string targetPrefix, out string targetPart, out string targetField);
 			Text targetLabel = KrabUi.Label(targetRow.transform, targetText, 13, targetColor);
@@ -901,8 +906,6 @@ namespace KRAB.UI
 			FitLabel fit = targetLabel.gameObject.AddComponent<FitLabel>();
 			fit.Init(targetLabel, targetPrefix, targetPart, targetField);
 			KrabUi.Tooltip(targetLabel.gameObject, targetText);
-			KrabUi.TextButton(targetRow.transform, Loc("#LOC_KRAB_ui_pickPart"),
-				() => StartPartPick(output), KrabUi.Panel, KrabUi.GreenHi, 11, 0f, 20f);
 
 			GameObject paramRow = KrabUi.Go("Params", left.transform);
 			KrabUi.Horizontal(paramRow, 0, 6f);
@@ -925,7 +928,9 @@ namespace KRAB.UI
 
 			GameObject right = KrabUi.Go("Right", card);
 			KrabUi.Vertical(right, 0, 3f);
-			KrabUi.Size(right, 130f, -1f);
+			// Explicit flexibleWidth 0: otherwise the spacers inside make this column as
+			// flexible as the left one and it takes half of the card's spare width.
+			KrabUi.Size(right, 130f, -1f, 0f);
 
 			// Copy/paste the whole input/operator subtree feeding this output's port 0,
 			// so a combination built once can be replicated on another output tab.
@@ -974,6 +979,19 @@ namespace KRAB.UI
 			}
 		}
 
+		private static string TargetFieldName(KrabNode output)
+		{
+			return output.Info.name == "AxisOutput"
+				? output.GetString("axisName", "")
+				: output.GetString("actionName", "");
+		}
+
+		/// <summary>True once a part and field/action were picked, even if the part is now missing.</summary>
+		private static bool IsTargetBound(KrabNode output)
+		{
+			return output.GetString("persistentId", "0") != "0" && !string.IsNullOrEmpty(TargetFieldName(output));
+		}
+
 		/// <summary>
 		/// Target description plus a state color: normal (bound), muted (never bound),
 		/// or danger (the bound part no longer exists on this craft). The binding is
@@ -986,12 +1004,9 @@ namespace KRAB.UI
 		{
 			partTitle = null;
 			detail = null;
-			string field = output.Info.name == "AxisOutput"
-				? output.GetString("axisName", "")
-				: output.GetString("actionName", "");
+			string field = TargetFieldName(output);
 			string persistentIdText = output.GetString("persistentId", "0");
-			bool bound = persistentIdText != "0" && !string.IsNullOrEmpty(field);
-			if (!bound)
+			if (!IsTargetBound(output))
 			{
 				color = KrabUi.Muted;
 				prefix = NodeName(output) + " · " + Loc("#LOC_KRAB_ui_notBound");

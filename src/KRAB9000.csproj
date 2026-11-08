@@ -6,7 +6,7 @@
     <LangVersion>8.0</LangVersion>
     <AssemblyName>KRAB9000</AssemblyName>
     <RootNamespace>KRAB</RootNamespace>
-    <Version>0.5.2</Version>
+    <Version>0.5.3</Version>
     <DebugType>none</DebugType>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <!-- KSP install the reference assemblies come from. Defaults to the game root
