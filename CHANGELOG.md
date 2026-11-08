@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.3]
+
+### Added
+
+- **Resizable editor window**: drag the strip along its bottom edge to make the tree taller or shorter.
+- **Every node in the tree can now be removed**, including an output's root.
+
+### Fixed
+
+- **Longer target names **: the target row uses (nearly) the whole width of the card.
+
 ## [0.5.2]
 
 ### Fixed
