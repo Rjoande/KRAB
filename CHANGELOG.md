@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.5.4]
+
+### Added
+
+- **Four new math operators**: Divide, Power (square root is exponent 0.5), Log (natural, or any base set on the node) and Absolute value. Undefined cases (division by zero, a negative base with a fractional exponent, log of zero or less) output 0, never NaN or infinity.
+
+### Changed
+
+- **The source picker now lists every operator**, grouped into MATH, FILTERS and LOGIC families. Picker families are collapsible: all closed the first time, then they stay as you left them for the rest of the game session.
+- **CONSTANT is now at the top of the picker**, always visible.
+- **"+ Term" is now the only add button on a group** and opens the full picker: source, operator or reused signal. "+ Group" and "+ Filter" are gone, and cancelling adds nothing.
+
+### Fixed
+
+- The NOT gate could not be added from the editor.
+
 ## [0.5.3]
 
 ### Added
