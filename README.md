@@ -10,11 +10,12 @@ Where the KAL-1000 plays back a hand-authored sequence, the KRAB-9000 *listens* 
 
 - **A real node graph, not a timeline.** Wire sources into operators into outputs, nest operators inside each other's ports, reuse a signal in more than one place (fan-out).
 - **Sources**: raw player stick input, the vessel's post-autopilot effective command, live vessel telemetry (speed, altitude, dynamic pressure, g-force, angular rates, attitude relative to the local horizon, mass, ...), action group state, a live numeric/on-off field read from any specific part (Part Field — the same "click a part in the scene" gesture as an output's target), and 4 assignable input slots bindable to Action Groups like the KAL's own axis groups.
-- **Combinators**: weighted sum (with an optional min/max clamp, editable without touching a save file), product, min, max, gated blend, and the logic gates (AND/OR/NOT/XOR).
-- **Filters**: Remap (linear, or with a dedicated point-and-drag response curve editor), Derivative, Integrator (with a resettable accumulator and the same optional clamp, for building PI/PID regulators directly in the graph), Rate Limit (slew), Comparator with hysteresis, Hold (sample-and-track or latch), and the trigonometric functions (Sin/Cos/Tan/Asin/Acos/Atan/Atan2).
+- **Math**: weighted sum (with an optional min/max clamp, editable without touching a save file), product, divide, min, max, power, logarithm (natural or any base), absolute value, and the trigonometric functions (Sin/Cos/Tan/Asin/Acos/Atan/Atan2). Undefined cases (division by zero, log of zero...) output 0, never NaN or infinity.
+- **Filters**: Remap (linear, or with a dedicated point-and-drag response curve editor), Gated Blend, Derivative, Integrator (with a resettable accumulator and the same optional clamp, for building PI/PID regulators directly in the graph), Rate Limit (slew), Hold (sample-and-track or latch).
+- **Logic**: Comparator with hysteresis and the logic gates (AND/OR/NOT/XOR).
 - **Outputs**: drive any part's axis field directly (servo angle, RCS thrust percentage, reaction wheel authority, ...) or fire a part action on a signal edge.
 - **Axis promotion**: RCS thrust percentage and reaction wheel authority limiter become assignable Axis Group fields, just like a KAL's own targets — so KRAB (and KAL) can drive them directly.
-- **A dedicated editor window**, built entirely in code (no external UI assets): tree view with live per-node telemetry, a vertically resizable layout, undo/redo, a VAB/SPH condition simulator (drive the graph with sliders before you ever launch), copy/paste of a whole input combination between outputs, hover tooltips, and English/Italian localization.
+- **A dedicated editor window**, built entirely in code (no external UI assets): tree view with live per-node telemetry, a single picker with collapsible families for every source and operator, a vertically resizable layout, undo/redo, a VAB/SPH condition simulator (drive the graph with sliders before you ever launch), copy/paste of a whole input combination between outputs, hover tooltips, and English/Italian localization.
 
 ## Requirements
 
