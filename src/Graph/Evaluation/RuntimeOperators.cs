@@ -66,6 +66,71 @@ namespace KRAB.Graph.Evaluation
 		}
 	}
 
+	/// <summary>Ports: 0 = numerator, 1 = denominator. A zero denominator (or a float
+	/// overflow) outputs 0, so no infinity ever reaches downstream nodes or a part field.</summary>
+	public class DivideRuntime : RuntimeNode
+	{
+		public override void Evaluate(EvalContext ctx)
+		{
+			float denominator = In(1);
+			float result = denominator != 0f ? In(0) / denominator : 0f;
+			Output = float.IsNaN(result) || float.IsInfinity(result) ? 0f : result;
+		}
+	}
+
+	/// <summary>Ports: 0 = base, 1 = exponent. Square root is exponent 0.5, an exponential
+	/// is a Constant e as base. Undefined results (negative base with a non-integer
+	/// exponent, zero to a negative power) output 0 instead of NaN or infinity.</summary>
+	public class PowerRuntime : RuntimeNode
+	{
+		public override void Evaluate(EvalContext ctx)
+		{
+			float result = Mathf.Pow(In(0), In(1));
+			Output = float.IsNaN(result) || float.IsInfinity(result) ? 0f : result;
+		}
+	}
+
+	/// <summary>
+	/// Logarithm in the `base` param; absent (or the literal "e") means natural log.
+	/// A base that is not a positive number other than 1 disables the node. Inputs
+	/// at or below zero output 0.
+	/// </summary>
+	public class LogRuntime : RuntimeNode
+	{
+		private float divisor;
+
+		public override bool OnCompiled()
+		{
+			string declared = Definition.GetString("base", "e").Trim();
+			if (declared.Length == 0 || declared == "e")
+			{
+				divisor = 1f;
+				return true;
+			}
+			float logBase = Definition.GetFloat("base", float.NaN);
+			if (float.IsNaN(logBase) || logBase <= 0f || logBase == 1f)
+			{
+				return false;
+			}
+			divisor = Mathf.Log(logBase);
+			return true;
+		}
+
+		public override void Evaluate(EvalContext ctx)
+		{
+			float value = In(0);
+			Output = value > 0f ? Mathf.Log(value) / divisor : 0f;
+		}
+	}
+
+	public class AbsRuntime : RuntimeNode
+	{
+		public override void Evaluate(EvalContext ctx)
+		{
+			Output = Mathf.Abs(In(0));
+		}
+	}
+
 	/// <summary>
 	/// Linear inMin..inMax → outMin..outMax by default. A `curve` sub-node takes over
 	/// entirely: its keyframes define both domain (x = raw input) and range (y = output),

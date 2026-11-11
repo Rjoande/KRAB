@@ -239,12 +239,16 @@ namespace KRAB.Graph.Evaluation
 				case "PhysicalState": return new PhysicalStateRuntime();
 				case "ActionGroupState": return new ActionGroupStateRuntime();
 				case "KrillGroupState": return new KrillGroupStateRuntime();
-			case "KrillAxisState": return new KrillAxisStateRuntime();
+				case "KrillAxisState": return new KrillAxisStateRuntime();
 				case "PartField": return new PartFieldRuntime();
 				case "WeightedSum": return new WeightedSumRuntime();
 				case "Product": return new ProductRuntime();
 				case "Min": return new MinRuntime();
 				case "Max": return new MaxRuntime();
+				case "Divide": return new DivideRuntime();
+				case "Power": return new PowerRuntime();
+				case "Log": return new LogRuntime();
+				case "Abs": return new AbsRuntime();
 				case "Remap": return new RemapRuntime();
 				case "GatedBlend": return new GatedBlendRuntime();
 				case "Derivative": return new DerivativeRuntime();

@@ -10,11 +10,21 @@ namespace KRAB.Graph
 		Output
 	}
 
+	/// <summary>Picker family of an operator; None for sources and outputs.</summary>
+	public enum OperatorFamily
+	{
+		None,
+		Math,
+		Filter,
+		Logic
+	}
+
 	/// <summary>Static description of a node subtype: family and input arity.</summary>
 	public class SubtypeInfo
 	{
 		public readonly string name;
 		public readonly NodeKind kind;
+		public readonly OperatorFamily family;
 
 		/// <summary>Fixed input port count; -1 for dynamic-arity nodes.</summary>
 		public readonly int fixedInputs;
@@ -23,12 +33,14 @@ namespace KRAB.Graph
 		public bool HasDynamicInputs => fixedInputs < 0;
 		public int MinInputs => fixedInputs < 0 ? minDynamicInputs : fixedInputs;
 
-		public SubtypeInfo(string name, NodeKind kind, int fixedInputs, int minDynamicInputs = 0)
+		public SubtypeInfo(string name, NodeKind kind, int fixedInputs, int minDynamicInputs = 0,
+			OperatorFamily family = OperatorFamily.None)
 		{
 			this.name = name;
 			this.kind = kind;
 			this.fixedInputs = fixedInputs;
 			this.minDynamicInputs = minDynamicInputs;
+			this.family = family;
 		}
 	}
 
@@ -40,6 +52,8 @@ namespace KRAB.Graph
 	{
 		private static readonly Dictionary<string, SubtypeInfo> registry =
 			new Dictionary<string, SubtypeInfo>(StringComparer.OrdinalIgnoreCase);
+		// Dictionary enumeration order is unspecified; the picker needs registration order.
+		private static readonly List<SubtypeInfo> ordered = new List<SubtypeInfo>();
 
 		static KrabSubtypes()
 		{
@@ -53,31 +67,38 @@ namespace KRAB.Graph
 			Register(new SubtypeInfo("KrillGroupState", NodeKind.Source, 0));
 			Register(new SubtypeInfo("KrillAxisState", NodeKind.Source, 0));
 			Register(new SubtypeInfo("PartField", NodeKind.Source, 0));
-			// Operators
-			Register(new SubtypeInfo("WeightedSum", NodeKind.Operator, -1, 1));
-			Register(new SubtypeInfo("Product", NodeKind.Operator, -1, 2));
-			Register(new SubtypeInfo("Min", NodeKind.Operator, 2));
-			Register(new SubtypeInfo("Max", NodeKind.Operator, 2));
-			Register(new SubtypeInfo("Remap", NodeKind.Operator, 1));
-			Register(new SubtypeInfo("GatedBlend", NodeKind.Operator, 3));
-			Register(new SubtypeInfo("Derivative", NodeKind.Operator, 1));
-			Register(new SubtypeInfo("Integrator", NodeKind.Operator, 2));
-			Register(new SubtypeInfo("SlewRate", NodeKind.Operator, 1));
-			Register(new SubtypeInfo("Comparator", NodeKind.Operator, 1));
-			Register(new SubtypeInfo("Hold", NodeKind.Operator, 3));
+			// Operators, in picker order within each family.
+			// Math: Divide/Power/Log never emit NaN or infinity (undefined cases output 0).
+			Operator("WeightedSum", -1, OperatorFamily.Math, 1);
+			Operator("Product", -1, OperatorFamily.Math, 2);
+			Operator("Divide", 2, OperatorFamily.Math);
+			Operator("Min", 2, OperatorFamily.Math);
+			Operator("Max", 2, OperatorFamily.Math);
+			Operator("Power", 2, OperatorFamily.Math);
+			Operator("Log", 1, OperatorFamily.Math);
+			Operator("Abs", 1, OperatorFamily.Math);
 			// Trigonometry (degrees in/out, matching every other angle in KRAB — AoA, deployAngle...)
-			Register(new SubtypeInfo("Sin", NodeKind.Operator, 1));
-			Register(new SubtypeInfo("Cos", NodeKind.Operator, 1));
-			Register(new SubtypeInfo("Tan", NodeKind.Operator, 1));
-			Register(new SubtypeInfo("Asin", NodeKind.Operator, 1));
-			Register(new SubtypeInfo("Acos", NodeKind.Operator, 1));
-			Register(new SubtypeInfo("Atan", NodeKind.Operator, 1));
-			Register(new SubtypeInfo("Atan2", NodeKind.Operator, 2));
-			// Logic gates (boolean convention: >= 0.5 is true, outputs are exactly 0/1)
-			Register(new SubtypeInfo("And", NodeKind.Operator, -1, 2));
-			Register(new SubtypeInfo("Or", NodeKind.Operator, -1, 2));
-			Register(new SubtypeInfo("Not", NodeKind.Operator, 1));
-			Register(new SubtypeInfo("Xor", NodeKind.Operator, 2));
+			Operator("Sin", 1, OperatorFamily.Math);
+			Operator("Cos", 1, OperatorFamily.Math);
+			Operator("Tan", 1, OperatorFamily.Math);
+			Operator("Asin", 1, OperatorFamily.Math);
+			Operator("Acos", 1, OperatorFamily.Math);
+			Operator("Atan", 1, OperatorFamily.Math);
+			Operator("Atan2", 2, OperatorFamily.Math);
+			// Filters: shape a signal, most of them stateful.
+			Operator("Remap", 1, OperatorFamily.Filter);
+			Operator("GatedBlend", 3, OperatorFamily.Filter);
+			Operator("Derivative", 1, OperatorFamily.Filter);
+			Operator("Integrator", 2, OperatorFamily.Filter);
+			Operator("SlewRate", 1, OperatorFamily.Filter);
+			Operator("Hold", 3, OperatorFamily.Filter);
+			// Logic (boolean convention: >= 0.5 is true, outputs are exactly 0/1).
+			// Comparator lives here because it produces a boolean.
+			Operator("Comparator", 1, OperatorFamily.Logic);
+			Operator("And", -1, OperatorFamily.Logic, 2);
+			Operator("Or", -1, OperatorFamily.Logic, 2);
+			Operator("Not", 1, OperatorFamily.Logic);
+			Operator("Xor", 2, OperatorFamily.Logic);
 			// Outputs
 			Register(new SubtypeInfo("AxisOutput", NodeKind.Output, 1));
 			Register(new SubtypeInfo("ActionTrigger", NodeKind.Output, 1));
@@ -86,6 +107,36 @@ namespace KRAB.Graph
 		private static void Register(SubtypeInfo info)
 		{
 			registry.Add(info.name, info);
+			ordered.Add(info);
+		}
+
+		private static void Operator(string name, int fixedInputs, OperatorFamily family, int minDynamicInputs = 0)
+		{
+			Register(new SubtypeInfo(name, NodeKind.Operator, fixedInputs, minDynamicInputs, family));
+		}
+
+		/// <summary>Every registered operator, in registration order.</summary>
+		public static IEnumerable<SubtypeInfo> Operators()
+		{
+			foreach (SubtypeInfo info in ordered)
+			{
+				if (info.kind == NodeKind.Operator)
+				{
+					yield return info;
+				}
+			}
+		}
+
+		/// <summary>Operators of one picker family, in registration order.</summary>
+		public static IEnumerable<SubtypeInfo> OperatorsIn(OperatorFamily family)
+		{
+			foreach (SubtypeInfo info in Operators())
+			{
+				if (info.family == family)
+				{
+					yield return info;
+				}
+			}
 		}
 
 		/// <summary>Look up a subtype regardless of declared kind (for diagnostics).</summary>

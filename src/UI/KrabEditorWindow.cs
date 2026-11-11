@@ -99,12 +99,16 @@ namespace KRAB.UI
 			None,
 			Source,      // choosing what feeds pickerTarget:pickerPort
 			TargetField, // choosing the axis/action of pickedPart for output pickerTarget
-			Filter,      // choosing a shaping operator (KrabGraphEdits.InsertableFilters) to add to pickerTarget
 			KrillGroup,  // choosing a KRILL extended group (11+) number for pickerTarget:pickerPort
 			KrillAxis    // choosing a KRILL axis number for pickerTarget:pickerPort
 		}
 
 		private PickerKind pickerKind;
+		// Source picker families the player expanded: static, so the choice holds for the
+		// whole game session across every controller. Collapsed by default, never saved.
+		private static readonly HashSet<string> ExpandedFamilies = new HashSet<string>();
+		private RectTransform sourcePickerList;
+		private float pendingPickerScroll = -1f;
 		private KrabNode pickerTarget;
 		private int pickerPort;
 		// Non-null while TargetField picks a part+field for a brand-new Part Field
@@ -631,12 +635,6 @@ namespace KRAB.UI
 			if (pickerKind == PickerKind.TargetField)
 			{
 				BuildTargetFieldPicker();
-				BuildFooter();
-				return;
-			}
-			if (pickerKind == PickerKind.Filter)
-			{
-				BuildFilterPicker();
 				BuildFooter();
 				return;
 			}
@@ -1347,15 +1345,13 @@ namespace KRAB.UI
 				GameObject addRow = KrabUi.Go("AddRow", parent);
 				KrabUi.Horizontal(addRow, 0, 6f);
 				KrabUi.Size(KrabUi.Go("Indent", addRow.transform), (depth + 1) * 18f, 4f);
+				// The picker targets the first free port: nothing is added until a choice
+				// is made, so Cancel leaves the group untouched.
 				KrabNode captured = node;
-				KrabUi.TextButton(addRow.transform, Loc("#LOC_KRAB_ui_addTerm"),
-					() => Mutate(() => KrabGraphEdits.AddTerm(Graph, captured)),
+				Button addTermButton = KrabUi.TextButton(addRow.transform, Loc("#LOC_KRAB_ui_addTerm"),
+					() => OpenSourcePicker(captured, KrabGraphEdits.CountInputPorts(Graph, captured)),
 					KrabUi.Panel2, KrabUi.GreenHi, 11, 0f, 20f);
-				KrabUi.TextButton(addRow.transform, Loc("#LOC_KRAB_ui_addGroup"),
-					() => Mutate(() => KrabGraphEdits.AddSubgroup(Graph, captured)),
-					KrabUi.Panel2, KrabUi.GreenHi, 11, 0f, 20f);
-				KrabUi.TextButton(addRow.transform, Loc("#LOC_KRAB_ui_addFilter"),
-					() => OpenFilterPicker(captured), KrabUi.Panel2, KrabUi.GreenHi, 11, 0f, 20f);
+				KrabUi.Tooltip(addTermButton.gameObject, "#LOC_KRAB_tip_addTerm");
 			}
 		}
 
@@ -1421,6 +1417,37 @@ namespace KRAB.UI
 					return;
 				}
 				Mutate(() => node.SetParam(param, sanitized));
+			});
+		}
+
+		/// <summary>Log's base: "e" (or empty) removes the param, i.e. natural log; any other
+		/// entry must be a positive number other than 1, or the field reverts.</summary>
+		private void LogBaseField(Transform parent, KrabNode node)
+		{
+			string currentValue = node.GetString("base", "e");
+			KrabUi.Field(parent, currentValue, 44f, text =>
+			{
+				text = text != null ? text.Trim() : "";
+				if (text.Length == 0 || text == "e" || text == "E")
+				{
+					if (node.HasParam("base"))
+					{
+						Mutate(() => node.RemoveParam("base"));
+					}
+					else
+					{
+						RebuildContent();
+					}
+					return;
+				}
+				string sanitized = SanitizeNumber(text);
+				float logBase = sanitized != null ? float.Parse(sanitized, CultureInfo.InvariantCulture) : 0f;
+				if (sanitized == null || sanitized == currentValue || logBase <= 0f || logBase == 1f)
+				{
+					RebuildContent();
+					return;
+				}
+				Mutate(() => node.SetParam("base", sanitized));
 			});
 		}
 
@@ -1503,6 +1530,10 @@ namespace KRAB.UI
 					break;
 				case "Integrator":
 					BuildClampFields(parent, node);
+					break;
+				case "Log":
+					ParamLabel(parent, "base", "#LOC_KRAB_tip_paramLogBase");
+					LogBaseField(parent, node);
 					break;
 				case "Remap":
 					if (node.HasNode("curve"))
@@ -1743,18 +1774,6 @@ namespace KRAB.UI
 			pickerKind = PickerKind.Source;
 			pickerTarget = target;
 			pickerPort = port;
-			RebuildContent();
-		}
-
-		/// <summary>
-		/// Opens the picker for KrabGraphEdits.InsertableFilters (Remap, Derivative,
-		/// SlewRate, Comparator, Hold): the only way to add one to a group, since they
-		/// are neither a cycleable combination operator nor a source.
-		/// </summary>
-		private void OpenFilterPicker(KrabNode group)
-		{
-			pickerKind = PickerKind.Filter;
-			pickerTarget = group;
 			RebuildContent();
 		}
 
@@ -2162,12 +2181,22 @@ namespace KRAB.UI
 			KrabUi.Label(panel, Loc("#LOC_KRAB_ui_pickSource"), 10, KrabUi.TanDim);
 			RectTransform list = ResizableList(panel);
 
+			sourcePickerList = list;
+
+			// Always visible, first: the most common choice and a single button.
+			Text constantHeader = KrabUi.Label(list, Loc("#LOC_KRAB_fam_constant"), 11, KrabUi.TanDim);
+			KrabUi.Tooltip(constantHeader.gameObject, "#LOC_KRAB_tip_fam_constant");
+			RectTransform constGrid = KrabUi.Grid(list, 138f, 22f);
+			KrabUi.TextButton(constGrid, NodeDisplay("Constant"),
+				() => ApplyNewSource("Constant", "value", "0"),
+				KrabUi.Panel2, KrabUi.Text, 11, 0f, 22f);
+
 			RectTransform playerGrid = BuildVocabularyFamily(list, "#LOC_KRAB_fam_player", Channels, "#LOC_KRAB_ch_",
 				name => ApplyNewSource("PlayerAxis", "channel", name), "#LOC_KRAB_tip_fam_player");
 			// KRILL's virtual axes (5+; 1-4 mirror stock's Custom01..04, already above)
 			// join the PLAYER AXES family as one inline button rather than getting their
 			// own header. Hidden unless the installed KRILL exposes GetAxisState (0.3.0+).
-			if (KrillGroupBridge.AxisInstalled)
+			if (playerGrid != null && KrillGroupBridge.AxisInstalled)
 			{
 				Button krillAxisButton = KrabUi.TextButton(playerGrid, Loc("#LOC_KRAB_ui_pickKrillAxis"),
 					StartKrillAxisPick, KrabUi.Panel2, KrabUi.GreenHi, 11, 0f, 22f);
@@ -2183,28 +2212,27 @@ namespace KRAB.UI
 			// KRILL's extended groups (11+) join the ACTION GROUP family as one inline
 			// button, not a grid of their own: up to 89 groups would bloat this list, so
 			// the number picker it opens holds them. Hidden if KRILL isn't installed.
-			if (KrillGroupBridge.Installed)
+			if (actionGroupGrid != null && KrillGroupBridge.Installed)
 			{
 				Button krillGroupButton = KrabUi.TextButton(actionGroupGrid, Loc("#LOC_KRAB_ui_pickKrillGroup"),
 					StartKrillGroupPick, KrabUi.Panel2, KrabUi.GreenHi, 11, 0f, 22f);
 				KrabUi.Tooltip(krillGroupButton.gameObject, "#LOC_KRAB_tip_krillGroup");
 			}
 
-			// No fixed vocabulary (depends on the picked part): same "Pick target…" scene
+			// No fixed vocabulary (depends on the picked part): same "Pick target..." scene
 			// gesture as an output's target, but it starts a NEW source instead of
 			// retargeting an existing node (StartPartFieldPick, not StartPartPick).
-			Text partFieldHeader = KrabUi.Label(list, Loc("#LOC_KRAB_fam_partField"), 11, KrabUi.TanDim);
-			KrabUi.Tooltip(partFieldHeader.gameObject, "#LOC_KRAB_tip_fam_partField");
-			RectTransform partFieldGrid = KrabUi.Grid(list, 138f, 22f);
-			KrabUi.TextButton(partFieldGrid, Loc("#LOC_KRAB_ui_pickPart"), StartPartFieldPick,
-				KrabUi.Panel2, KrabUi.GreenHi, 11, 0f, 22f);
+			if (FamilyHeader(list, "#LOC_KRAB_fam_partField", "#LOC_KRAB_tip_fam_partField"))
+			{
+				RectTransform partFieldGrid = KrabUi.Grid(list, 138f, 22f);
+				KrabUi.TextButton(partFieldGrid, Loc("#LOC_KRAB_ui_pickPart"), StartPartFieldPick,
+					KrabUi.Panel2, KrabUi.GreenHi, 11, 0f, 22f);
+			}
 
 			// Hidden when this controller's own "Show KRAB Input axes" PAW toggle is off,
 			// matching what that toggle already does to PAW and the Axis Groups screen.
-			if (module.showInputAxes)
+			if (module.showInputAxes && FamilyHeader(list, "#LOC_KRAB_fam_krabInput", "#LOC_KRAB_tip_fam_krabInput"))
 			{
-				Text krabInputHeader = KrabUi.Label(list, Loc("#LOC_KRAB_fam_krabInput"), 11, KrabUi.TanDim);
-				KrabUi.Tooltip(krabInputHeader.gameObject, "#LOC_KRAB_tip_fam_krabInput");
 				RectTransform slotGrid = KrabUi.Grid(list, 138f, 22f);
 				for (int slot = 1; slot <= ModuleKRABController.InputSlotCount; slot++)
 				{
@@ -2215,42 +2243,11 @@ namespace KRAB.UI
 				}
 			}
 
-			Text constantHeader = KrabUi.Label(list, Loc("#LOC_KRAB_fam_constant"), 11, KrabUi.TanDim);
-			KrabUi.Tooltip(constantHeader.gameObject, "#LOC_KRAB_tip_fam_constant");
-			RectTransform constGrid = KrabUi.Grid(list, 138f, 22f);
-			KrabUi.TextButton(constGrid, NodeDisplay("Constant"),
-				() => ApplyNewSource("Constant", "value", "0"),
-				KrabUi.Panel2, KrabUi.Text, 11, 0f, 22f);
-
-			// Turn this leaf into an operator instead of a source. Reaches any port,
-			// including a fixed-arity node's own (chains like Remap→SlewRate), unlike
-			// "+Term/+Group/+Filter" which only append to a dynamic group.
-			Text operatorsHeader = KrabUi.Label(list, Loc("#LOC_KRAB_fam_operators"), 11, KrabUi.TanDim);
-			KrabUi.Tooltip(operatorsHeader.gameObject, "#LOC_KRAB_tip_fam_operators");
-			RectTransform opGrid = KrabUi.Grid(list, 138f, 22f);
-			Button weightedSumButton = KrabUi.TextButton(opGrid, NodeDisplay("WeightedSum"),
-				() => ApplyNewOperator("WeightedSum"), KrabUi.Panel2, KrabUi.Text, 11, 0f, 22f);
-			KrabUi.Tooltip(weightedSumButton.gameObject, "#LOC_KRAB_tip_node_WeightedSum");
-			foreach (string filterSubtype in KrabGraphEdits.InsertableFilters)
-			{
-				string captured = filterSubtype;
-				Button filterButton = KrabUi.TextButton(opGrid, NodeDisplay(captured),
-					() => ApplyNewOperator(captured), KrabUi.Panel2, KrabUi.Text, 11, 0f, 22f);
-				KrabUi.Tooltip(filterButton.gameObject, "#LOC_KRAB_tip_node_" + captured);
-			}
-
-			// Same insertion mechanism as the shaping filters above, in its own labeled
-			// sub-section: pure math functions, no state or params.
-			Text trigHeader = KrabUi.Label(list, Loc("#LOC_KRAB_fam_trig"), 11, KrabUi.TanDim);
-			KrabUi.Tooltip(trigHeader.gameObject, "#LOC_KRAB_tip_fam_trig");
-			RectTransform trigGrid = KrabUi.Grid(list, 138f, 22f);
-			foreach (string trigSubtype in KrabGraphEdits.InsertableTrigFunctions)
-			{
-				string captured = trigSubtype;
-				Button trigButton = KrabUi.TextButton(trigGrid, NodeDisplay(captured),
-					() => ApplyNewOperator(captured), KrabUi.Panel2, KrabUi.Text, 11, 0f, 22f);
-				KrabUi.Tooltip(trigButton.gameObject, "#LOC_KRAB_tip_node_" + captured);
-			}
+			// Operators, generated from the registry. Choosing one turns this port into
+			// that operator, any port included (chains like Remap -> SlewRate).
+			BuildOperatorFamily(list, OperatorFamily.Math, "#LOC_KRAB_fam_math", "#LOC_KRAB_tip_fam_math");
+			BuildOperatorFamily(list, OperatorFamily.Filter, "#LOC_KRAB_fam_filters", "#LOC_KRAB_tip_fam_filters");
+			BuildOperatorFamily(list, OperatorFamily.Logic, "#LOC_KRAB_fam_logic", "#LOC_KRAB_tip_fam_logic");
 
 			// Fan-out: feed this port from a node that already exists elsewhere in the
 			// graph (the tree view then shows it under both consumers).
@@ -2267,52 +2264,67 @@ namespace KRAB.UI
 					KrabUi.Tooltip(reuseButton.gameObject, NodeFullLabel(candidate));
 				}
 			}
+			RestorePickerScroll();
 
 			Button cancel = KrabUi.TextButton(panel, Loc("#LOC_KRAB_ui_cancel"), CancelPicker,
 				KrabUi.Panel2, KrabUi.Muted, 12, 90f, 24f);
 			KrabUi.Size(cancel.gameObject, 90f, 24f);
 		}
 
-		/// <summary>
-		/// Picker for KrabGraphEdits.InsertableFilters and InsertableTrigFunctions,
-		/// opened by "+ Filter" on a group. Selecting one adds it as a new term via
-		/// AddSubgroup, which auto-fills whatever ports it needs.
-		/// </summary>
-		private void BuildFilterPicker()
+		private void BuildOperatorFamily(RectTransform list, OperatorFamily family, string familyKey, string tipKey)
 		{
-			RectTransform panel = KrabUi.Bordered("FilterPicker", contentHost, KrabUi.Panel, KrabUi.Line);
-			KrabUi.Vertical(panel.gameObject, 9, 6f);
-			KrabUi.Label(panel, Loc("#LOC_KRAB_ui_pickFilter"), 10, KrabUi.TanDim);
-			RectTransform list = ResizableList(panel);
-
-			KrabNode target = pickerTarget;
-			foreach (string subtype in KrabGraphEdits.InsertableFilters)
+			if (!FamilyHeader(list, familyKey, tipKey))
 			{
-				string captured = subtype;
-				Button filterButton = KrabUi.TextButton(list, NodeDisplay(captured), () =>
-				{
-					ClearPickerState();
-					Mutate(() => KrabGraphEdits.AddSubgroup(Graph, target, captured));
-				}, KrabUi.Panel2, KrabUi.Text, 12, 0f, 24f);
-				KrabUi.Tooltip(filterButton.gameObject, "#LOC_KRAB_tip_node_" + captured);
+				return;
 			}
-
-			Text trigHeader = KrabUi.Label(list, Loc("#LOC_KRAB_fam_trig"), 10, KrabUi.TanDim);
-			KrabUi.Tooltip(trigHeader.gameObject, "#LOC_KRAB_tip_fam_trig");
-			foreach (string trigSubtype in KrabGraphEdits.InsertableTrigFunctions)
+			RectTransform grid = KrabUi.Grid(list, 138f, 22f);
+			foreach (SubtypeInfo info in KrabSubtypes.OperatorsIn(family))
 			{
-				string captured = trigSubtype;
-				Button trigButton = KrabUi.TextButton(list, NodeDisplay(captured), () =>
-				{
-					ClearPickerState();
-					Mutate(() => KrabGraphEdits.AddSubgroup(Graph, target, captured));
-				}, KrabUi.Panel2, KrabUi.Text, 12, 0f, 24f);
-				KrabUi.Tooltip(trigButton.gameObject, "#LOC_KRAB_tip_node_" + captured);
+				string captured = info.name;
+				Button button = KrabUi.TextButton(grid, NodeDisplay(captured),
+					() => ApplyNewOperator(captured), KrabUi.Panel2, KrabUi.Text, 11, 0f, 22f);
+				KrabUi.Tooltip(button.gameObject, "#LOC_KRAB_tip_node_" + captured);
 			}
+		}
 
-			Button cancel = KrabUi.TextButton(panel, Loc("#LOC_KRAB_ui_cancel"), CancelPicker,
-				KrabUi.Panel2, KrabUi.Muted, 12, 90f, 24f);
-			KrabUi.Size(cancel.gameObject, 90f, 24f);
+		/// <summary>
+		/// Collapsible family header (right/down triangle + name); true when expanded, so
+		/// the caller builds the family's grid only then. Toggling keeps the list's scroll
+		/// offset, so the clicked header stays where it was.
+		/// </summary>
+		private bool FamilyHeader(RectTransform list, string familyKey, string tipKey)
+		{
+			bool expanded = ExpandedFamilies.Contains(familyKey);
+			Button header = KrabUi.TextButton(list, (expanded ? "\u25BE " : "\u25B8 ") + Loc(familyKey), () =>
+			{
+				if (!ExpandedFamilies.Remove(familyKey))
+				{
+					ExpandedFamilies.Add(familyKey);
+				}
+				pendingPickerScroll = list.anchoredPosition.y;
+				RebuildContent();
+			}, KrabUi.Inset, KrabUi.TanDim, 11, 0f, 20f);
+			HorizontalLayoutGroup inner = header.GetComponent<HorizontalLayoutGroup>();
+			inner.childAlignment = TextAnchor.MiddleLeft;
+			inner.padding = new RectOffset(2, 10, 1, 1);
+			if (tipKey != null)
+			{
+				KrabUi.Tooltip(header.gameObject, tipKey);
+			}
+			return expanded;
+		}
+
+		/// <summary>Re-applies the scroll offset saved by a family toggle, once the
+		/// rebuilt list has its final height (ScrollRect clamps it if out of range).</summary>
+		private void RestorePickerScroll()
+		{
+			if (pendingPickerScroll < 0f || sourcePickerList == null)
+			{
+				return;
+			}
+			LayoutRebuilder.ForceRebuildLayoutImmediate(sourcePickerList);
+			sourcePickerList.anchoredPosition = new Vector2(sourcePickerList.anchoredPosition.x, pendingPickerScroll);
+			pendingPickerScroll = -1f;
 		}
 
 		/// <summary>
@@ -2368,14 +2380,13 @@ namespace KRAB.UI
 		}
 
 		/// <summary>Returns the family's grid so a caller can append extra buttons inline
-		/// with the vocabulary entries; most callers ignore the return value.</summary>
+		/// with the vocabulary entries, or null while the family is collapsed.</summary>
 		private RectTransform BuildVocabularyFamily(RectTransform list, string familyKey, string[] entries,
 			string entryKeyPrefix, System.Action<string> onPick, string tipKey = null)
 		{
-			Text header = KrabUi.Label(list, Loc(familyKey), 11, KrabUi.TanDim);
-			if (tipKey != null)
+			if (!FamilyHeader(list, familyKey, tipKey))
 			{
-				KrabUi.Tooltip(header.gameObject, tipKey);
+				return null;
 			}
 			RectTransform grid = KrabUi.Grid(list, 138f, 22f);
 			foreach (string entry in entries)
@@ -2400,9 +2411,8 @@ namespace KRAB.UI
 		}
 
 		/// <summary>
-		/// Turns the leaf under this picker into an operator instead of a source.
-		/// Reaches fixed-arity nodes' own ports (e.g. nesting a Remap inside a SlewRate),
-		/// which "+Filter" cannot: it only appends a new term to a dynamic group.
+		/// Feeds the picker's port from a new operator instead of a source, on any port:
+		/// a fixed-arity node's own (nesting a Remap inside a SlewRate) or a group's next one.
 		/// </summary>
 		private void ApplyNewOperator(string subtype)
 		{

@@ -11,12 +11,6 @@ namespace KRAB.Graph
 	/// </summary>
 	public static class KrabGraphEdits
 	{
-		/// <summary>Operators offered by the group "combination" control.</summary>
-		public static readonly string[] CycleableOperators =
-		{
-			"WeightedSum", "Product", "Min", "Max", "GatedBlend", "And", "Or", "Xor"
-		};
-
 		public static int CountInputPorts(KrabGraph graph, KrabNode node)
 		{
 			if (node.IsKnown && !node.Info.HasDynamicInputs)
@@ -42,20 +36,16 @@ namespace KRAB.Graph
 		}
 
 		/// <summary>
-		/// Operators whose arity matches the given term count, in CycleableOperators order,
-		/// current subtype included if it fits. CompatibleOperators strips the current one;
+		/// Operators whose arity matches the given term count, in registry order, current
+		/// subtype included if it fits. CompatibleOperators strips the current one;
 		/// CycleOperator needs its position to advance from it.
 		/// </summary>
 		private static List<string> ArityMatches(int terms)
 		{
 			List<string> result = new List<string>();
-			foreach (string name in CycleableOperators)
+			foreach (SubtypeInfo info in KrabSubtypes.Operators())
 			{
-				SubtypeInfo info = KrabSubtypes.Find(name);
-				if (info == null)
-				{
-					continue;
-				}
+				string name = info.name;
 				bool fits = info.HasDynamicInputs ? terms >= info.MinInputs : info.fixedInputs == terms;
 				if (fits)
 				{
@@ -105,22 +95,6 @@ namespace KRAB.Graph
 			graph.AddLink(source.id, group.id, port);
 			return source;
 		}
-
-		/// <summary>
-		/// Shaping operators that combine no terms of their own (Remap, Derivative,
-		/// SlewRate, Comparator, Hold), as opposed to the N-ary combiners in
-		/// CycleableOperators. The editor can only add one through this list.
-		/// </summary>
-		public static readonly string[] InsertableFilters =
-			{ "Remap", "Derivative", "Integrator", "SlewRate", "Comparator", "Hold" };
-
-		/// <summary>
-		/// Pure trigonometric functions, inserted through the same "turn this leaf into an
-		/// operator" mechanism as InsertableFilters but rendered as their own labeled
-		/// sub-section. Unlike the shaping filters they carry no internal state or params.
-		/// </summary>
-		public static readonly string[] InsertableTrigFunctions =
-			{ "Sin", "Cos", "Tan", "Asin", "Acos", "Atan", "Atan2" };
 
 		/// <summary>
 		/// Add a nested sub-group term of the given subtype (the "visual parentheses"),
@@ -334,9 +308,9 @@ namespace KRAB.Graph
 		}
 
 		/// <summary>
-		/// Replace whatever feeds a port with a fresh operator (dynamic combiner or one of
-		/// InsertableFilters), auto-filling its required ports. Unlike AddSubgroup/AddTerm it
-		/// works from the per-port picker, so a fixed-arity node's port can become an operator.
+		/// Replace whatever feeds a port with a fresh operator, auto-filling its required
+		/// ports. Works on any port, a fixed-arity node's included, and on the first free
+		/// port of a dynamic group (ClearPort is then a no-op), which is how "+ Term" appends.
 		/// </summary>
 		public static KrabNode ReplaceTermWithOperator(KrabGraph graph, KrabNode target, int port, string subtype)
 		{
