@@ -18,9 +18,10 @@ KRAB*.zip
 # never loads it) — useful while developing, not meant for the public release.
 Test/GraphSample.cfg.txt
 
-# Texture working files: only the exported .dds ships with the mod.
-Parts/*.psd
-Parts/*.dds.backup
+# Texture working files belong in docs/textures/: only the exported .dds
+# ships with the mod, so keep these out of the payload.
+GameData/KRAB/**/*.psd
+GameData/KRAB/**/*.dds.backup
 
 # OS/editor cruft
 .DS_Store
